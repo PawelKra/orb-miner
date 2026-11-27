@@ -10,6 +10,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
+import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.GameStatus
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.SphereGeometry
@@ -30,7 +31,10 @@ import kotlin.random.Random
  * Every cell is one flat-coloured polygon, lit as a whole (Lambert, specular and rim terms evaluated at
  * the cell centre) and outlined by a thin dark border. Digits, flags and mines are decals: they are drawn
  * in a local glyph space that a perspective matrix maps onto a square in the cell's tangent plane, so
- * they lie on the surface and rotate with the ball.
+ * they lie on the surface and rotate with the ball. Flags and mines keep a fixed frame on the ball.
+ * Digits turn with the view: each frame their baseline snaps to the cell edge that is most horizontal
+ * on screen, so they stay as upright as the cell shape allows. Far cells show their number in gold
+ * inside a gold ring. Walls are glowing lines along cell edges, drawn on top of the cells.
  *
  * Everything that depends only on the geometry (cell sizes, tangent frames, colours, glyph metrics,
  * confetti parameters, shaders, paints) is computed once in the constructor. [draw] works on
@@ -70,6 +74,13 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private val decalDst = FloatArray(8)
     private val decalMatrix = Matrix()
 
+    // Corners of the cell last passed to buildCellPath: rotated model space (x,y,z) and screen (x,y).
+    private val cellWorld: FloatArray
+    private val cellScreen: FloatArray
+
+    /** Edge index the digit of each cell is aligned to, -1 before the first draw; gives the choice hysteresis. */
+    private val digitEdge = IntArray(cellCount) { -1 }
+
     // Frame parameters shared by the helpers.
     private var frameCx = 0f
     private var frameCy = 0f
@@ -96,6 +107,18 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         textAlign = Paint.Align.LEFT
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
     }
+    private val wallGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val wallCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+    /** Wall stroke width in model units, derived from the mean cell size. */
+    private val wallWidth: Float
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val iconStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -104,9 +127,12 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val confettiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
-    /** Per-digit offsets that put the centre of the glyph's ink bounds on the decal origin. */
-    private val digitX = FloatArray(9)
-    private val digitY = FloatArray(9)
+    /** Per-number offsets that put the centre of the glyph's ink bounds on the decal origin. */
+    private val digitX = FloatArray(MAX_NUMBER + 1)
+    private val digitY = FloatArray(MAX_NUMBER + 1)
+
+    /** Per-number scale that fits the number inside the ring of a far cell. */
+    private val farScale = FloatArray(MAX_NUMBER + 1)
 
     // Unit-radius shaders, positioned and scaled through the canvas matrix.
     private val haloShader = RadialGradient(
@@ -163,6 +189,11 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private val cfColor = IntArray(CONFETTI_COUNT)
 
     init {
+        var most = 0
+        for (i in 0 until cellCount) most = max(most, cornerStart[i + 1] - cornerStart[i])
+        cellWorld = FloatArray(most * 3)
+        cellScreen = FloatArray(most * 2)
+
         for (i in 0 until cellCount) {
             val o = i * 3
             val cx = centers[o]
@@ -198,16 +229,23 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             assignBaseColor(i, cy)
         }
 
+        var radiusSum = 0f
+        for (i in 0 until cellCount) radiusSum += cellRadius[i]
+        wallWidth = radiusSum / max(1, cellCount) * WALL_WIDTH_PER_RADIUS
+
         // Digit size: ink height of the digits is a fixed share of the inscribed diameter.
         val bounds = Rect()
         textPaint.textSize = 100f
         textPaint.getTextBounds(DIGITS[8], 0, 1, bounds)
         val inkHeight = max(1, bounds.height()).toFloat()
         textPaint.textSize = 100f * DIGIT_INK_HEIGHT / inkHeight
-        for (n in 1..8) {
-            textPaint.getTextBounds(DIGITS[n], 0, 1, bounds)
+        for (n in 1..MAX_NUMBER) {
+            val text = DIGITS[n]
+            textPaint.getTextBounds(text, 0, text.length, bounds)
             digitX[n] = -(bounds.left + bounds.right) * 0.5f
             digitY[n] = -(bounds.top + bounds.bottom) * 0.5f
+            val halfDiagonal = 0.5f * sqrt((bounds.width() * bounds.width() + bounds.height() * bounds.height()).toFloat())
+            farScale[n] = min(FAR_MAX_SCALE, FAR_TEXT_RADIUS / max(1f, halfDiagonal))
         }
 
         val random = Random(CONFETTI_SEED)
@@ -292,6 +330,8 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         effect: SphereEffect,
         effectStartNanos: Long,
         nowNanos: Long,
+        effectCell: Int = -1,
+        layout: BoardLayout? = null,
     ) {
         val width = scope.size.width
         val height = scope.size.height
@@ -307,9 +347,11 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
         var cx = SphereCamera.centerX(width, insets)
         var cy = SphereCamera.centerY(height, insets)
-        if (effect == SphereEffect.EXPLOSION && effectTime < SHAKE_SECONDS) {
+        val blast = effect == SphereEffect.EXPLOSION || effect == SphereEffect.MINE_HIT
+        if (blast && effectTime < SHAKE_SECONDS) {
             val decay = 1f - effectTime / SHAKE_SECONDS
-            val amp = radius * 0.08f * decay * decay
+            val strength = if (effect == SphereEffect.EXPLOSION) 0.08f else 0.045f
+            val amp = radius * strength * decay * decay
             cx += amp * sin(effectTime * 71f)
             cy += amp * 0.7f * cos(effectTime * 53f)
         }
@@ -323,16 +365,21 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val visible = transformAndCull()
         sortBackToFront(visible)
         for (k in 0 until visible) {
-            drawCell(canvas, order[k], board, status)
+            drawCell(canvas, order[k], board, status, layout)
         }
+        if (layout != null) drawWalls(canvas, layout)
 
         drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
 
-        if (effect == SphereEffect.EXPLOSION && board != null && effectTime < EXPLOSION_SECONDS) {
-            drawExplosion(canvas, board.explodedCell, radius, effectTime)
+        if (blast && board != null && effectTime < EXPLOSION_SECONDS) {
+            val cell = if (effect == SphereEffect.EXPLOSION) board.explodedCell else effectCell
+            drawExplosion(canvas, cell, radius, effectTime)
         }
         if (effect == SphereEffect.WIN && effectTime < WIN_SECONDS) {
             drawConfetti(canvas, cx, cy, radius, effectTime)
+        }
+        if (effect == SphereEffect.HINT && effectTime < HINT_SECONDS) {
+            drawHintPulse(canvas, effectCell, effectTime)
         }
     }
 
@@ -412,34 +459,121 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             val sx = frameCx + wx * s
             val sy = frameCy - wy * s
             if (j == 0) path.moveTo(sx, sy) else path.lineTo(sx, sy)
+            cellWorld[j * 3] = wx
+            cellWorld[j * 3 + 1] = wy
+            cellWorld[j * 3 + 2] = wz
+            cellScreen[j * 2] = sx
+            cellScreen[j * 2 + 1] = sy
             p += 3
             j++
         }
         path.close()
     }
 
-    /**
-     * Sets [decalMatrix] so that decal space (x right, y down, [-DECAL_HALF, DECAL_HALF] on both axes)
-     * maps with true perspective onto the square centre +- inRadius * (right, up) in the cell's tangent
-     * plane. Returns false when the projected square is degenerate.
-     */
+    /** Decal in the cell's fixed model-space frame (flags, mines): it rotates together with the ball. */
     private fun setupDecal(cell: Int): Boolean {
         val m = matrix
         val o = cell * 3
-        val s = inRadius[cell]
         val ax = decalRight[o]
         val ay = decalRight[o + 1]
         val az = decalRight[o + 2]
         val bx = decalUp[o]
         val by = decalUp[o + 1]
         val bz = decalUp[o + 2]
-        // Rotated right and up vectors, pre-scaled by the half-size of the square.
-        val rx = (m[0] * ax + m[1] * ay + m[2] * az) * s
-        val ry = (m[3] * ax + m[4] * ay + m[5] * az) * s
-        val rz = (m[6] * ax + m[7] * ay + m[8] * az) * s
-        val ux = (m[0] * bx + m[1] * by + m[2] * bz) * s
-        val uy = (m[3] * bx + m[4] * by + m[5] * bz) * s
-        val uz = (m[6] * bx + m[7] * by + m[8] * bz) * s
+        return setupDecalFrame(
+            cell,
+            m[0] * ax + m[1] * ay + m[2] * az,
+            m[3] * ax + m[4] * ay + m[5] * az,
+            m[6] * ax + m[7] * ay + m[8] * az,
+            m[0] * bx + m[1] * by + m[2] * bz,
+            m[3] * bx + m[4] * by + m[5] * bz,
+            m[6] * bx + m[7] * by + m[8] * bz,
+        )
+    }
+
+    /**
+     * Decal aligned to the cell edge that is most horizontal on screen (digits). Must follow
+     * buildCellPath(cell), which fills the corner buffers. The previous choice is kept until another
+     * edge is clearly more horizontal, so the digit does not flicker between two equally good edges.
+     */
+    private fun setupAlignedDecal(cell: Int): Boolean {
+        val count = cornerStart[cell + 1] - cornerStart[cell]
+        if (count < 3) return false
+        var best = -1
+        var bestScore = Float.MAX_VALUE
+        var previousScore = Float.MAX_VALUE
+        val previous = digitEdge[cell]
+        for (j in 0 until count) {
+            val score = edgeSlope(j, if (j + 1 < count) j + 1 else 0)
+            if (score < bestScore) {
+                bestScore = score
+                best = j
+            }
+            if (j == previous) previousScore = score
+        }
+        if (best < 0) return false
+        if (previous in 0 until count && previousScore <= bestScore + EDGE_HYSTERESIS) best = previous
+        digitEdge[cell] = best
+        val a = best
+        val b = if (best + 1 < count) best + 1 else 0
+
+        // Edge direction in rotated model space, oriented to point right on screen.
+        var ex = cellWorld[b * 3] - cellWorld[a * 3]
+        var ey = cellWorld[b * 3 + 1] - cellWorld[a * 3 + 1]
+        var ez = cellWorld[b * 3 + 2] - cellWorld[a * 3 + 2]
+        if (cellScreen[b * 2] < cellScreen[a * 2]) {
+            ex = -ex
+            ey = -ey
+            ez = -ez
+        }
+        // Project onto the tangent plane at the unit centre c, then up = c x right.
+        val o = cell * 3
+        val cx = rotated[o]
+        val cy = rotated[o + 1]
+        val cz = rotated[o + 2]
+        val dot = ex * cx + ey * cy + ez * cz
+        ex -= dot * cx
+        ey -= dot * cy
+        ez -= dot * cz
+        val len = sqrt(ex * ex + ey * ey + ez * ez)
+        if (len < 1e-6f) return false
+        ex /= len
+        ey /= len
+        ez /= len
+        return setupDecalFrame(
+            cell, ex, ey, ez,
+            cy * ez - cz * ey,
+            cz * ex - cx * ez,
+            cx * ey - cy * ex,
+        )
+    }
+
+    /** |sin| of the screen angle between edge (a, b) and the horizontal; MAX_VALUE for a degenerate edge. */
+    private fun edgeSlope(a: Int, b: Int): Float {
+        val dx = cellScreen[b * 2] - cellScreen[a * 2]
+        val dy = cellScreen[b * 2 + 1] - cellScreen[a * 2 + 1]
+        val len = sqrt(dx * dx + dy * dy)
+        return if (len < 1e-3f) Float.MAX_VALUE else abs(dy) / len
+    }
+
+    /**
+     * Sets [decalMatrix] so that decal space (x right, y down, [-DECAL_HALF, DECAL_HALF] on both axes)
+     * maps with true perspective onto the square centre +- inRadius * (right, up) in the cell's tangent
+     * plane. Right and up are unit vectors in rotated model space. Returns false when the projected
+     * square is degenerate.
+     */
+    private fun setupDecalFrame(
+        cell: Int, rightX: Float, rightY: Float, rightZ: Float, upX: Float, upY: Float, upZ: Float,
+    ): Boolean {
+        val o = cell * 3
+        val s = inRadius[cell]
+        // Right and up vectors pre-scaled by the half-size of the square.
+        val rx = rightX * s
+        val ry = rightY * s
+        val rz = rightZ * s
+        val ux = upX * s
+        val uy = upY * s
+        val uz = upZ * s
         val cx = rotated[o]
         val cy = rotated[o + 1]
         val cz = rotated[o + 2]
@@ -459,7 +593,9 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
     // ------------------------------------------------------------------ cells
 
-    private fun drawCell(canvas: Canvas, cell: Int, board: MinesweeperBoard?, status: GameStatus) {
+    private fun drawCell(
+        canvas: Canvas, cell: Int, board: MinesweeperBoard?, status: GameStatus, layout: BoardLayout?,
+    ) {
         val o = cell * 3
         val rx = rotated[o]
         val ry = rotated[o + 1]
@@ -495,6 +631,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         if (lost && cell == board.explodedCell) {
             fillLit(canvas, projR, 0.95f, 0.13f, 0.16f, light, spec, 0.4f)
             drawMineDecal(canvas, cell, decalAlpha, MINE_ON_RED_COLOR)
+        } else if (board.isDetonated(cell)) {
+            // A mine that cost a life earlier: darker red than the one that ended the game.
+            fillLit(canvas, projR, 0.62f, 0.10f, 0.14f, light, spec, 0.3f)
+            drawMineDecal(canvas, cell, decalAlpha, MINE_ON_RED_COLOR)
         } else if (lost && mine && !flagged) {
             fillLit(canvas, projR, 0.31f, 0.32f, 0.36f, light, spec, 0.25f)
             drawMineDecal(canvas, cell, decalAlpha, MINE_COLOR)
@@ -513,7 +653,11 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             )
             if (!mine) {
                 val n = board.adjacentMines(cell)
-                if (n in 1..8) drawDigitDecal(canvas, cell, n, decalAlpha)
+                if (layout != null && layout.isFar(cell)) {
+                    drawFarDecal(canvas, cell, n, decalAlpha)
+                } else if (n in 1..MAX_NUMBER) {
+                    drawDigitDecal(canvas, cell, n, decalAlpha)
+                }
             }
         } else if (lost && flagged && board.isWrongFlag(cell)) {
             // A flag on a safe cell: muted red cell and a greyed-out flag.
@@ -553,16 +697,81 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     // ------------------------------------------------------------------ decals
 
     private fun drawDigitDecal(canvas: Canvas, cell: Int, n: Int, alpha: Float) {
-        if (alpha < MIN_DECAL_ALPHA || !setupDecal(cell)) return
+        if (alpha < MIN_DECAL_ALPHA || !setupAlignedDecal(cell)) return
         canvas.save()
         canvas.concat(decalMatrix)
         val x = digitX[n]
         val y = digitY[n]
+        val text = DIGITS[n]
         textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
-        canvas.drawText(DIGITS[n], 0, 1, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
-        textPaint.color = MathUtils.withAlpha(NUMBER_COLORS[n], alpha)
-        canvas.drawText(DIGITS[n], 0, 1, x, y, textPaint)
+        canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
+        textPaint.color = MathUtils.withAlpha(NUMBER_COLORS[min(n, NUMBER_COLORS.size - 1)], alpha)
+        canvas.drawText(text, 0, text.length, x, y, textPaint)
         canvas.restore()
+    }
+
+    /** Far cell: gold ring, and the gold number inside it when it is not zero. */
+    private fun drawFarDecal(canvas: Canvas, cell: Int, n: Int, alpha: Float) {
+        if (alpha < MIN_DECAL_ALPHA || !setupAlignedDecal(cell)) return
+        canvas.save()
+        canvas.concat(decalMatrix)
+        ringPaint.strokeWidth = FAR_RING_STROKE
+        ringPaint.color = MathUtils.withAlpha(FAR_COLOR, alpha * FAR_RING_ALPHA)
+        canvas.drawCircle(0f, 0f, FAR_RING_RADIUS, ringPaint)
+        if (n in 1..MAX_NUMBER) {
+            val s = farScale[n]
+            canvas.scale(s, s)
+            val text = DIGITS[n]
+            val x = digitX[n]
+            val y = digitY[n]
+            textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+            canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
+            textPaint.color = MathUtils.withAlpha(FAR_COLOR, alpha)
+            canvas.drawText(text, 0, text.length, x, y, textPaint)
+        }
+        canvas.restore()
+    }
+
+    // ------------------------------------------------------------------ walls
+
+    /** Every wall segment whose ends face the viewer: a wide soft glow under a thin bright core. */
+    private fun drawWalls(canvas: Canvas, layout: BoardLayout) {
+        for (wall in layout.walls) {
+            for (k in 0 until wall.size - 1) {
+                drawWallSegment(canvas, wall[k], wall[k + 1])
+            }
+        }
+    }
+
+    private fun drawWallSegment(canvas: Canvas, cornerA: Int, cornerB: Int) {
+        val m = matrix
+        val d = SphereCamera.DISTANCE
+        var p = cornerA * 3
+        val ax = m[0] * corners[p] + m[1] * corners[p + 1] + m[2] * corners[p + 2]
+        val ay = m[3] * corners[p] + m[4] * corners[p + 1] + m[5] * corners[p + 2]
+        val az = m[6] * corners[p] + m[7] * corners[p + 1] + m[8] * corners[p + 2]
+        p = cornerB * 3
+        val bx = m[0] * corners[p] + m[1] * corners[p + 1] + m[2] * corners[p + 2]
+        val by = m[3] * corners[p] + m[4] * corners[p + 1] + m[5] * corners[p + 2]
+        val bz = m[6] * corners[p] + m[7] * corners[p + 1] + m[8] * corners[p + 2]
+        // Same facing measure as the cells: cosine between the surface normal and the view direction.
+        val fa = (d * az - 1f) / sqrt(ax * ax + ay * ay + (d - az) * (d - az))
+        val fb = (d * bz - 1f) / sqrt(bx * bx + by * by + (d - bz) * (d - bz))
+        val alpha = MathUtils.smoothstep(DECAL_FADE_START, DECAL_FADE_END, min(fa, fb))
+        if (alpha < MIN_DECAL_ALPHA) return
+        val sa = frameFocal / (d - az)
+        val sb = frameFocal / (d - bz)
+        val x0 = frameCx + ax * sa
+        val y0 = frameCy - ay * sa
+        val x1 = frameCx + bx * sb
+        val y1 = frameCy - by * sb
+        val width = wallWidth * (sa + sb) * 0.5f
+        wallGlowPaint.strokeWidth = width * WALL_GLOW_FACTOR
+        wallGlowPaint.color = MathUtils.withAlpha(WALL_GLOW_COLOR, alpha * WALL_GLOW_ALPHA)
+        canvas.drawLine(x0, y0, x1, y1, wallGlowPaint)
+        wallCorePaint.strokeWidth = width
+        wallCorePaint.color = MathUtils.withAlpha(WALL_CORE_COLOR, alpha)
+        canvas.drawLine(x0, y0, x1, y1, wallCorePaint)
     }
 
     /** Flat flag icon: thin pole, triangular pennant and a short base line. */
@@ -645,6 +854,24 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         drawUnitShader(canvas, explosionShader, x, y, r, r, fade * fade)
     }
 
+    /** Two expanding rings around the cell a hint revealed; they follow the cell while the ball turns. */
+    private fun drawHintPulse(canvas: Canvas, cell: Int, t: Float) {
+        if (cell < 0 || cell >= cellCount || facing[cell] <= 0f) return
+        val o = cell * 3
+        val s = frameFocal / (SphereCamera.DISTANCE - rotated[o + 2])
+        val x = frameCx + rotated[o] * s
+        val y = frameCy - rotated[o + 1] * s
+        val base = cellRadius[cell] * s
+        ringPaint.strokeWidth = max(2f, base * 0.12f)
+        for (ring in 0 until 2) {
+            val p = (t / HINT_SECONDS - ring * 0.25f) / 0.75f
+            if (p <= 0f || p >= 1f) continue
+            val fade = 1f - p
+            ringPaint.color = MathUtils.withAlpha(HINT_COLOR, fade * fade)
+            canvas.drawCircle(x, y, base * (0.8f + 1.6f * MathUtils.easeOutCubic(p)), ringPaint)
+        }
+    }
+
     private fun drawConfetti(canvas: Canvas, cx: Float, cy: Float, radius: Float, t: Float) {
         val fadeOut = 1f - MathUtils.smoothstep(WIN_SECONDS - 1f, WIN_SECONDS, t)
         if (fadeOut <= 0f) return
@@ -697,8 +924,26 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             -DECAL_HALF, DECAL_HALF,
         )
 
-        /** Digit ink height in decal units: 63 % of the inscribed diameter (2 * DECAL_HALF). */
-        private const val DIGIT_INK_HEIGHT = 0.63f * 2f * DECAL_HALF
+        /** Digit ink height in decal units: 54 % of the inscribed diameter (2 * DECAL_HALF). */
+        private const val DIGIT_INK_HEIGHT = 0.54f * 2f * DECAL_HALF
+
+        /** Largest number a cell can show: a far hexagon sees 6 + 12 cells. */
+        private const val MAX_NUMBER = 19
+
+        // Far cells: ring radius and stroke in decal units, number scaled to fit inside the ring.
+        private const val FAR_RING_RADIUS = 86f
+        private const val FAR_RING_STROKE = 8f
+        private const val FAR_RING_ALPHA = 0.85f
+        private const val FAR_TEXT_RADIUS = 66f
+        private const val FAR_MAX_SCALE = 0.9f
+
+        // Walls: core width relative to the mean cell radius, glow width relative to the core.
+        private const val WALL_WIDTH_PER_RADIUS = 0.07f
+        private const val WALL_GLOW_FACTOR = 3.2f
+        private const val WALL_GLOW_ALPHA = 0.4f
+
+        /** A digit switches to another edge only when that edge is this much flatter (|sin|, about 5 degrees). */
+        private const val EDGE_HYSTERESIS = 0.09f
         private const val DIGIT_SHADOW_OFFSET = 4f
         private const val DIGIT_SHADOW_ALPHA = 0.45f
 
@@ -722,6 +967,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private const val FLASH_TINT_SECONDS = 0.35f
         private const val EXPLOSION_SECONDS = 1.0f
         private const val WIN_SECONDS = 3.2f
+        private const val HINT_SECONDS = 1.4f
 
         private const val CONFETTI_COUNT = 120
         private const val CONFETTI_SEED = 20240611
@@ -762,7 +1008,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             HALF_Z = hz / hl
         }
 
-        private val DIGITS = arrayOf("0", "1", "2", "3", "4", "5", "6", "7", "8")
+        private val DIGITS = Array(MAX_NUMBER + 1) { it.toString() }
 
         /** Index = number of adjacent mines (index 0 unused). */
         private val NUMBER_COLORS = intArrayOf(
@@ -787,6 +1033,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private val BORDER_COLOR = argbLong(0xF00A0C12)
         private val DIGIT_SHADOW_COLOR = argbLong(0xFF000000)
         private val TINT_COLOR = argbLong(0xFFFF2040)
+        private val FAR_COLOR = argbLong(0xFFFFD166)
+        private val WALL_CORE_COLOR = argbLong(0xFFFFF3D6)
+        private val WALL_GLOW_COLOR = argbLong(0xFFFF9A3C)
+        private val HINT_COLOR = argbLong(0xFF4FE3FF)
 
         private val CONFETTI_COLORS = intArrayOf(
             argbLong(0xFFFFD166),
@@ -803,13 +1053,15 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
         private val EXPLOSION_NANOS = (EXPLOSION_SECONDS * 1e9f).toLong()
         private val WIN_NANOS = (WIN_SECONDS * 1e9f).toLong()
+        private val HINT_NANOS = (HINT_SECONDS * 1e9f).toLong()
 
         private fun argbLong(value: Long): Int = value.toInt()
 
         /** How long [effect] needs frame ticks, in nanoseconds. */
         fun effectDurationNanos(effect: SphereEffect): Long = when (effect) {
             SphereEffect.NONE -> 0L
-            SphereEffect.EXPLOSION -> EXPLOSION_NANOS
+            SphereEffect.HINT -> HINT_NANOS
+            SphereEffect.MINE_HIT, SphereEffect.EXPLOSION -> EXPLOSION_NANOS
             SphereEffect.WIN -> WIN_NANOS
         }
     }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.AndroidViewModel
 import com.example.spheresweeper.data.GamePreferences
+import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.GameStatus
 import com.example.spheresweeper.logic.MinesweeperBoard
@@ -26,6 +27,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.acos
+import kotlin.math.sqrt
 
 enum class Screen { MENU, GAME }
 
@@ -43,6 +46,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val geometryCache = HashMap<BoardSize, SphereGeometry>()
     private var loadJob: Job? = null
     private var tickerJob: Job? = null
+    private var focusJob: Job? = null
+    private val focusRotation = Quaternion()
+    private val scratch = FloatArray(3)
 
     var screen by mutableStateOf(Screen.MENU)
         private set
@@ -54,6 +60,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     var board by mutableStateOf<MinesweeperBoard?>(null)
+        private set
+
+    /** Walls and far cells of the current game. */
+    var layout by mutableStateOf<BoardLayout?>(null)
+        private set
+
+    /** Hints the player can still use in this game. */
+    var hintsLeft by mutableIntStateOf(0)
         private set
 
     /** Bumped after every change of the (mutable) board so Compose redraws. */
@@ -91,6 +105,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var effectStartNanos by mutableLongStateOf(0L)
         private set
 
+    /** Cell where a [SphereEffect.MINE_HIT] goes off or a [SphereEffect.HINT] points; -1 otherwise. */
+    var effectCell by mutableIntStateOf(-1)
+        private set
+
     var flagByLongPress by mutableStateOf(prefs.flagByLongPress)
         private set
 
@@ -117,6 +135,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return board?.minesRemaining ?: boardSize.mines
         }
 
+    /** Lives not yet lost; reading it subscribes the caller to board changes. */
+    val livesLeft: Int
+        get() {
+            boardVersion
+            return board?.livesLeft ?: boardSize.lives
+        }
+
     // ---------------------------------------------------------------- navigation
 
     fun startGame(size: BoardSize) {
@@ -131,6 +156,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             geometry = null
             board = null
+            layout = null
             stopTimer()
             loadJob = scope.launch {
                 val built = withContext(Dispatchers.Default) { SphereGeometry.build(size.frequency) }
@@ -205,6 +231,72 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return if (b.isRevealed(cell)) chordOn(b, cell) else afterMove(b.reveal(cell), Feedback.NONE)
     }
 
+    /**
+     * Reveals a safe covered cell for the player, preferring cells next to the revealed area and
+     * close to the front of the ball, then turns the ball so the cell faces the player.
+     */
+    fun useHint(): Feedback {
+        val b = board ?: return Feedback.NONE
+        val g = geometry ?: return Feedback.NONE
+        if (screen != Screen.GAME || b.status != GameStatus.PLAYING || hintsLeft <= 0) return Feedback.NONE
+        val cell = pickHintCell(b, g)
+        if (cell < 0) return Feedback.NONE
+        hintsLeft--
+        startEffect(SphereEffect.HINT, cell)
+        focusOn(g, cell)
+        return afterMove(b.reveal(cell), Feedback.CHORD)
+    }
+
+    private fun pickHintCell(b: MinesweeperBoard, g: SphereGeometry): Int {
+        var best = -1
+        var bestScore = Float.NEGATIVE_INFINITY
+        for (cell in 0 until b.cellCount) {
+            if (b.isMine(cell) || b.isRevealed(cell) || b.isFlagged(cell)) continue
+            orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
+            // Facing the viewer counts in [-1, 1]; touching the revealed area outweighs it.
+            var score = scratch[2]
+            if (g.neighbors[cell].any { b.isRevealed(it) }) score += 2f
+            if (score > bestScore) {
+                bestScore = score
+                best = cell
+            }
+        }
+        return best
+    }
+
+    /** Turns the ball over [FOCUS_MILLIS] so that [cell] ends up in the middle of the view. */
+    private fun focusOn(g: SphereGeometry, cell: Int) {
+        orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
+        val px = scratch[0]
+        val py = scratch[1]
+        val pz = scratch[2].coerceIn(-1f, 1f)
+        val total = acos(pz)
+        if (total < FOCUS_MIN_ANGLE) return
+        // Axis p x (0, 0, 1); for a cell straight behind the ball any axis in the screen plane works.
+        var ax = py
+        var ay = -px
+        if (sqrt(ax * ax + ay * ay) < 1e-4f) {
+            ax = 1f
+            ay = 0f
+        }
+        focusJob?.cancel()
+        focusJob = scope.launch {
+            val start = SystemClock.uptimeMillis()
+            var done = 0f
+            while (true) {
+                val t = ((SystemClock.uptimeMillis() - start).toFloat() / FOCUS_MILLIS).coerceIn(0f, 1f)
+                val eased = 1f - (1f - t) * (1f - t) * (1f - t)
+                val step = total * eased - done
+                done += step
+                focusRotation.setFromAxisAngle(ax, ay, 0f, step)
+                orientation.preMultiply(focusRotation).normalize()
+                notifyOrientationChanged()
+                if (t >= 1f) break
+                delay(FRAME_MILLIS)
+            }
+        }
+    }
+
     private fun activeBoard(cell: Int, forGame: Int): MinesweeperBoard? {
         val b = board ?: return null
         if (screen != Screen.GAME || forGame != gameId) return null
@@ -234,6 +326,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return when (result) {
             MoveResult.NOTHING -> Feedback.NONE
             MoveResult.REVEALED -> success
+            MoveResult.MINE_HIT -> {
+                startEffect(SphereEffect.MINE_HIT, b?.lastDetonatedCell ?: -1)
+                Feedback.EXPLOSION
+            }
             MoveResult.WON -> {
                 finishGame(won = true)
                 success
@@ -256,7 +352,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         isNewBest = false
         effect = SphereEffect.NONE
         effectStartNanos = 0L
-        board = MinesweeperBoard(g.neighbors, boardSize.mines)
+        effectCell = -1
+        focusJob?.cancel()
+        hintsLeft = boardSize.hints
+        val newLayout = BoardLayout.generate(g, boardSize)
+        layout = newLayout
+        board = MinesweeperBoard(newLayout.scopes, boardSize.mines, lives = boardSize.lives)
         gameId++
         boardVersion++
     }
@@ -289,8 +390,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
         finalTimeMillis = elapsed
         elapsedSeconds = elapsed / 1000L
-        effect = if (won) SphereEffect.WIN else SphereEffect.EXPLOSION
-        effectStartNanos = System.nanoTime()
+        startEffect(if (won) SphereEffect.WIN else SphereEffect.EXPLOSION, -1)
         if (won) {
             val previous = bestTimes[boardSize]
             if (previous == null || elapsed < previous) {
@@ -301,6 +401,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun startEffect(newEffect: SphereEffect, cell: Int) {
+        effect = newEffect
+        effectCell = cell
+        effectStartNanos = System.nanoTime()
+    }
+
     override fun onCleared() {
         scope.cancel()
         super.onCleared()
@@ -308,5 +414,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TICK_MILLIS = 100L
+        const val FOCUS_MILLIS = 450f
+        const val FRAME_MILLIS = 16L
+
+        /** Cells closer than this to the view centre (radians) are not worth turning the ball for. */
+        const val FOCUS_MIN_ANGLE = 0.35f
     }
 }

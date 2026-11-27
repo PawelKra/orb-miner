@@ -237,6 +237,12 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
     val resources = LocalContext.current.resources
     val cells = resources.getQuantityString(R.plurals.cells_count, boardSize.cellCount, boardSize.cellCount)
     val mines = resources.getQuantityString(R.plurals.mines_count, boardSize.mines, boardSize.mines)
+    val details = if (boardSize.lives > 1) {
+        val lives = resources.getQuantityString(R.plurals.lives_count, boardSize.lives, boardSize.lives)
+        stringResource(R.string.board_details_lives, cells, mines, lives)
+    } else {
+        stringResource(R.string.board_details, cells, mines)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,7 +266,7 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
                 color = SpaceColors.TextPrimary,
             )
             Text(
-                text = stringResource(R.string.board_details, cells, mines),
+                text = details,
                 style = MaterialTheme.typography.bodySmall,
                 color = SpaceColors.TextSecondary,
             )

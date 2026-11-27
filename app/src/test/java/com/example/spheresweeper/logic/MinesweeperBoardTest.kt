@@ -333,6 +333,134 @@ class MinesweeperBoardTest {
         assertEquals(40, board.explodedCell)
     }
 
+    // ---------------------------------------------------------------- lives
+
+    @Test
+    fun livesAreAtLeastOneAndDefaultToClassicRules() {
+        val neighbors = geometry(BoardSize.SMALL).neighbors
+        assertEquals(1, MinesweeperBoard(neighbors, 3).lives)
+        assertEquals(1, MinesweeperBoard(neighbors, 3, lives = 0).lives)
+        assertEquals(3, MinesweeperBoard(neighbors, 3, lives = 3).livesLeft)
+        for (size in BoardSize.values()) assertTrue("$size", size.lives >= 1)
+    }
+
+    @Test
+    fun hittingMineWithSpareLifeContinuesGame() {
+        val neighbors = geometry(BoardSize.SMALL).neighbors
+        val board = MinesweeperBoard(neighbors, 2, lives = 2)
+        board.placeMinesAt(intArrayOf(10, 40))
+
+        assertEquals(MoveResult.MINE_HIT, board.reveal(40))
+        assertEquals(GameStatus.PLAYING, board.status)
+        assertEquals(1, board.livesLeft)
+        assertTrue(board.isDetonated(40))
+        assertFalse(board.isRevealed(40))
+        assertEquals(40, board.lastDetonatedCell)
+        assertEquals(-1, board.explodedCell)
+        assertEquals(1, board.detonatedCount)
+        assertEquals(1, board.minesRemaining)
+
+        // A detonated mine cannot be revealed again or flagged.
+        assertEquals(MoveResult.NOTHING, board.reveal(40))
+        assertFalse(board.toggleFlag(40))
+        assertEquals(1, board.livesLeft)
+
+        // The last life ends the game.
+        assertEquals(MoveResult.LOST, board.reveal(10))
+        assertEquals(GameStatus.LOST, board.status)
+        assertEquals(10, board.explodedCell)
+        assertEquals(0, board.livesLeft)
+    }
+
+    @Test
+    fun gameCanStillBeWonAfterMineHit() {
+        val neighbors = geometry(BoardSize.TINY).neighbors
+        val mines = intArrayOf(0, 5, 17, 30)
+        val board = MinesweeperBoard(neighbors, mines.size, lives = 2)
+        board.placeMinesAt(mines)
+        assertEquals(MoveResult.MINE_HIT, board.reveal(17))
+
+        var last = MoveResult.NOTHING
+        for (cell in 0 until board.cellCount) {
+            if (cell in mines || board.isRevealed(cell)) continue
+            last = board.reveal(cell)
+            assertNotEquals(MoveResult.LOST, last)
+        }
+        assertEquals(MoveResult.WON, last)
+        assertEquals(GameStatus.WON, board.status)
+        assertEquals(1, board.livesLeft)
+    }
+
+    @Test
+    fun detonatedMineCountsAsKnownForChording() {
+        val neighbors = geometry(BoardSize.SMALL).neighbors
+        val cell = 20
+        val mine = neighbors[cell][0]
+        val far = farCell(neighbors, cell)
+        val mines = intArrayOf(mine) + neighbors[far]
+        val board = MinesweeperBoard(neighbors, mines.size, lives = 3)
+        board.placeMinesAt(mines)
+        assertEquals(MoveResult.REVEALED, board.reveal(cell))
+        assertEquals(MoveResult.MINE_HIT, board.reveal(mine))
+        assertEquals(1, board.knownMineNeighbors(cell))
+        assertTrue(board.canChord(cell))
+
+        assertEquals(MoveResult.REVEALED, board.chord(cell))
+        for (nb in neighbors[cell]) {
+            if (nb != mine) assertTrue("neighbour $nb", board.isRevealed(nb))
+        }
+        assertTrue(board.isDetonated(mine))
+        assertEquals(2, board.livesLeft)
+    }
+
+    @Test
+    fun chordWithWrongFlagCostsLifeOrEndsGame() {
+        val neighbors = geometry(BoardSize.SMALL).neighbors
+        val cell = 20
+        val mine = neighbors[cell][0]
+        val wrong = neighbors[cell][1]
+        val far = farCell(neighbors, cell)
+        val mines = intArrayOf(mine) + neighbors[far]
+
+        val spared = MinesweeperBoard(neighbors, mines.size, lives = 2)
+        spared.placeMinesAt(mines)
+        assertEquals(MoveResult.REVEALED, spared.reveal(cell))
+        assertTrue(spared.toggleFlag(wrong))
+        assertEquals(MoveResult.MINE_HIT, spared.chord(cell))
+        assertEquals(GameStatus.PLAYING, spared.status)
+        assertTrue(spared.isDetonated(mine))
+        assertEquals(mine, spared.lastDetonatedCell)
+        assertEquals(1, spared.livesLeft)
+
+        val last = MinesweeperBoard(neighbors, mines.size, lives = 1)
+        last.placeMinesAt(mines)
+        assertEquals(MoveResult.REVEALED, last.reveal(cell))
+        assertTrue(last.toggleFlag(wrong))
+        assertEquals(MoveResult.LOST, last.chord(cell))
+        assertEquals(mine, last.explodedCell)
+    }
+
+    @Test
+    fun chordHittingMoreMinesThanLivesLeftLoses() {
+        val neighbors = geometry(BoardSize.SMALL).neighbors
+        val cell = 20
+        val a = neighbors[cell][0]
+        val b = neighbors[cell][1]
+        val wrong1 = neighbors[cell][2]
+        val wrong2 = neighbors[cell][3]
+        val board = MinesweeperBoard(neighbors, 2, lives = 2)
+        board.placeMinesAt(intArrayOf(a, b))
+        assertEquals(MoveResult.REVEALED, board.reveal(cell))
+        assertEquals(2, board.adjacentMines(cell))
+        assertTrue(board.toggleFlag(wrong1))
+        assertTrue(board.toggleFlag(wrong2))
+
+        assertEquals(MoveResult.LOST, board.chord(cell))
+        assertEquals(GameStatus.LOST, board.status)
+        assertEquals(a, board.explodedCell)
+        assertEquals(0, board.livesLeft)
+    }
+
     // ---------------------------------------------------------------- flags
 
     @Test

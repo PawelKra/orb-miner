@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -121,20 +122,37 @@ fun GlowTextButton(
     }
 }
 
-/** Compact translucent pill with an icon and a tabular-number value. */
+/**
+ * Compact translucent pill with an icon and a tabular-number value. With [onClick] it is a button;
+ * a disabled button is drawn dimmed.
+ */
 @Composable
 fun StatPill(
     value: String,
     contentDescription: String,
     accent: Color,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
     icon: DrawScope.(Color) -> Unit,
 ) {
+    val clickable = if (onClick != null) {
+        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+    } else {
+        Modifier
+    }
+    val borderAlpha = when {
+        onClick != null && enabled -> 0.85f
+        onClick != null -> 0.2f
+        else -> 0.45f
+    }
     Row(
         modifier = modifier
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(PillShape)
             .background(SpaceColors.Panel.copy(alpha = 0.72f))
-            .border(1.dp, accent.copy(alpha = 0.45f), PillShape)
+            .border(1.dp, accent.copy(alpha = borderAlpha), PillShape)
+            .then(clickable)
             .padding(horizontal = 14.dp, vertical = 8.dp)
             .semantics(mergeDescendants = true) { this.contentDescription = contentDescription },
         verticalAlignment = Alignment.CenterVertically,
@@ -235,6 +253,39 @@ fun DrawScope.drawClockIcon(color: Color) {
     drawCircle(color = color, radius = r, center = c, style = Stroke(width = stroke))
     drawLine(color = color, start = c, end = Offset(c.x, c.y - r * 0.6f), strokeWidth = stroke, cap = StrokeCap.Round)
     drawLine(color = color, start = c, end = Offset(c.x + r * 0.45f, c.y), strokeWidth = stroke, cap = StrokeCap.Round)
+}
+
+/** Filled heart: "lives". */
+fun DrawScope.drawHeartIcon(color: Color) {
+    val w = size.minDimension
+    val heart = Path().apply {
+        moveTo(w * 0.5f, w * 0.9f)
+        cubicTo(w * 0.1f, w * 0.62f, w * 0.0f, w * 0.42f, w * 0.05f, w * 0.3f)
+        cubicTo(w * 0.12f, w * 0.08f, w * 0.42f, w * 0.06f, w * 0.5f, w * 0.28f)
+        cubicTo(w * 0.58f, w * 0.06f, w * 0.88f, w * 0.08f, w * 0.95f, w * 0.3f)
+        cubicTo(w * 1.0f, w * 0.42f, w * 0.9f, w * 0.62f, w * 0.5f, w * 0.9f)
+        close()
+    }
+    drawPath(heart, color)
+}
+
+/** Light bulb: "hint". */
+fun DrawScope.drawBulbIcon(color: Color) {
+    val w = size.minDimension
+    drawCircle(color = color, radius = w * 0.3f, center = Offset(w * 0.5f, w * 0.38f))
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(w * 0.36f, w * 0.6f),
+        size = Size(w * 0.28f, w * 0.18f),
+        cornerRadius = CornerRadius(w * 0.04f, w * 0.04f),
+    )
+    drawLine(
+        color = color,
+        start = Offset(w * 0.4f, w * 0.88f),
+        end = Offset(w * 0.6f, w * 0.88f),
+        strokeWidth = w * 0.09f,
+        cap = StrokeCap.Round,
+    )
 }
 
 /** Small red flag on a pole. */

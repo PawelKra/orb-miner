@@ -10,6 +10,7 @@
     <string name="board_huge">Ogromna</string>
     <string name="board_giant">Gigantyczna</string>
     <string name="board_details">%1$s · %2$s</string>
+    <string name="board_details_lives">%1$s · %2$s · %3$s</string>
 
     <plurals name="cells_count">
         <item quantity="one">%d pole</item>
@@ -23,6 +24,13 @@
         <item quantity="few">miny: %d</item>
         <item quantity="many">miny: %d</item>
         <item quantity="other">miny: %d</item>
+    </plurals>
+
+    <plurals name="lives_count">
+        <item quantity="one">życia: %d</item>
+        <item quantity="few">życia: %d</item>
+        <item quantity="many">życia: %d</item>
+        <item quantity="other">życia: %d</item>
     </plurals>
 
     <string name="best_label">Rekord</string>
@@ -39,6 +47,8 @@
     <string name="hint_long_press">Stuknij, aby odkryć · przytrzymaj, aby postawić flagę · przeciągnij, aby obrócić</string>
 
     <string name="hud_mines_remaining">Pozostałe miny: %1$d</string>
+    <string name="hud_lives_remaining">Pozostałe życia: %1$d</string>
+    <string name="action_hint">Podpowiedź, zostało: %1$d</string>
     <string name="hud_time">Czas: %1$s</string>
     <string name="action_restart">Zagraj od nowa</string>
     <string name="action_menu">Wróć do menu</string>

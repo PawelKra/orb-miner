@@ -87,6 +87,23 @@ fun GameScreen(vm: GameViewModel) {
 
         Hud(vm = vm, landscape = landscape)
 
+        // Portrait: lives and hints use the band reserved for the help text, which is empty once play starts.
+        val showLives = vm.boardSize.lives > 1
+        val showHints = vm.boardSize.hints > 0
+        if (!landscape && (showLives || showHints) && status == GameStatus.PLAYING) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showLives) LivesPill(vm.livesLeft)
+                if (showHints) HintPill(vm)
+            }
+        }
+
         if (status == GameStatus.READY && board != null) {
             Text(
                 text = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap),
@@ -230,8 +247,35 @@ private fun SphereView(
             effect = vm.effect,
             effectStartNanos = vm.effectStartNanos,
             nowNanos = System.nanoTime(),
+            effectCell = vm.effectCell,
+            layout = vm.layout,
         )
     }
+}
+
+@Composable
+private fun LivesPill(lives: Int, modifier: Modifier = Modifier) {
+    StatPill(
+        value = lives.toString(),
+        contentDescription = stringResource(R.string.hud_lives_remaining, lives),
+        accent = SpaceColors.Heart,
+        modifier = modifier,
+        icon = { drawHeartIcon(it) },
+    )
+}
+
+@Composable
+private fun HintPill(vm: GameViewModel) {
+    val haptics = rememberHaptics(vm.hapticsEnabled)
+    val hints = vm.hintsLeft
+    StatPill(
+        value = hints.toString(),
+        contentDescription = stringResource(R.string.action_hint, hints),
+        accent = SpaceColors.Cyan,
+        onClick = { haptics.perform(vm.useHint()) },
+        enabled = hints > 0 && vm.status == GameStatus.PLAYING,
+        icon = { drawBulbIcon(it) },
+    )
 }
 
 @Composable
@@ -290,6 +334,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
             ) {
                 menuButton()
                 minesPill()
+                if (vm.boardSize.lives > 1) LivesPill(vm.livesLeft)
             }
             Column(
                 modifier = Modifier.align(Alignment.TopEnd),
@@ -298,6 +343,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
             ) {
                 restartButton()
                 timePill()
+                if (vm.boardSize.hints > 0) HintPill(vm)
             }
         }
     } else {
