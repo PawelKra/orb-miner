@@ -10,6 +10,8 @@ package com.example.spheresweeper.logic
  * - [walls]: number of walls; a number does not count mines on the other side of a wall.
  * - [wallMaxLength]: longest wall in cell edges; the shortest one is half of that, at least 2.
  * - [farCells]: cells whose number counts mines up to two steps away instead of one.
+ * - [lineCells]: cells whose number counts mines in a straight row of cells running from one of
+ *   their edges, up to 2 * [frequency] cells long, instead of their neighbours.
  */
 enum class BoardSize(
     val frequency: Int,
@@ -19,13 +21,14 @@ enum class BoardSize(
     val walls: Int,
     val wallMaxLength: Int,
     val farCells: Int,
+    val lineCells: Int,
 ) {
-    TINY(frequency = 2, mines = 6, lives = 1, hints = 0, walls = 0, wallMaxLength = 0, farCells = 0),
-    SMALL(frequency = 3, mines = 14, lives = 1, hints = 1, walls = 2, wallMaxLength = 4, farCells = 3),
-    MEDIUM(frequency = 4, mines = 28, lives = 2, hints = 1, walls = 3, wallMaxLength = 6, farCells = 5),
-    LARGE(frequency = 5, mines = 45, lives = 3, hints = 2, walls = 4, wallMaxLength = 8, farCells = 8),
-    HUGE(frequency = 6, mines = 65, lives = 4, hints = 2, walls = 5, wallMaxLength = 10, farCells = 11),
-    GIANT(frequency = 8, mines = 125, lives = 5, hints = 3, walls = 7, wallMaxLength = 14, farCells = 18);
+    TINY(frequency = 2, mines = 6, lives = 1, hints = 0, walls = 0, wallMaxLength = 0, farCells = 0, lineCells = 0),
+    SMALL(frequency = 3, mines = 14, lives = 1, hints = 1, walls = 2, wallMaxLength = 4, farCells = 3, lineCells = 2),
+    MEDIUM(frequency = 4, mines = 28, lives = 2, hints = 1, walls = 3, wallMaxLength = 6, farCells = 5, lineCells = 4),
+    LARGE(frequency = 5, mines = 45, lives = 3, hints = 2, walls = 4, wallMaxLength = 8, farCells = 8, lineCells = 6),
+    HUGE(frequency = 6, mines = 65, lives = 4, hints = 2, walls = 5, wallMaxLength = 10, farCells = 11, lineCells = 8),
+    GIANT(frequency = 8, mines = 125, lives = 5, hints = 3, walls = 7, wallMaxLength = 14, farCells = 18, lineCells = 12);
 
     val cellCount: Int get() = 10 * frequency * frequency + 2
 

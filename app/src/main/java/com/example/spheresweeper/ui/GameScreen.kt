@@ -44,27 +44,35 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.spheresweeper.R
+import com.example.spheresweeper.logic.Campaign
+import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.GameStatus
+import com.example.spheresweeper.logic.LevelSpec
 import com.example.spheresweeper.logic.MinesweeperBoard
+import com.example.spheresweeper.logic.RecordResult
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.ui.theme.SpaceColors
 import kotlinx.coroutines.delay
 
 @Composable
 fun GameScreen(vm: GameViewModel) {
-    BackHandler { vm.backToMenu() }
+    BackHandler { vm.exitGame() }
 
     val geometry = vm.geometry
     val board = vm.board
     val status = vm.status
     val finished = status == GameStatus.WON || status == GameStatus.LOST
+    val config = vm.config
+    val level = (config as? GameConfig.Level)?.spec
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
-        val viewInsets = rememberBallInsets(landscape)
+        val viewInsets = rememberBallInsets(landscape, withLevelLabel = level != null)
 
         SpaceBackground()
 
@@ -87,10 +95,13 @@ fun GameScreen(vm: GameViewModel) {
 
         Hud(vm = vm, landscape = landscape)
 
-        // Portrait: lives and hints use the band reserved for the help text, which is empty once play starts.
-        val showLives = vm.boardSize.lives > 1
-        val showHints = vm.boardSize.hints > 0
-        if (!landscape && (showLives || showHints) && status == GameStatus.PLAYING) {
+        // The game opens already PLAYING on a revealed start area; the help text stays until the first move.
+        val playerMoved = vm.playerMoved
+
+        // Portrait: lives and hints use the band reserved for the help text, so they appear after the first move.
+        val showLives = config.lives > 1
+        val showHints = config.hints > 0
+        if (!landscape && (showLives || showHints) && status == GameStatus.PLAYING && playerMoved) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -104,17 +115,30 @@ fun GameScreen(vm: GameViewModel) {
             }
         }
 
-        if (status == GameStatus.READY && board != null) {
-            Text(
-                text = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap),
-                style = MaterialTheme.typography.bodySmall,
-                color = SpaceColors.TextSecondary,
-                textAlign = TextAlign.Center,
+        if (board != null && status == GameStatus.PLAYING && !playerMoved) {
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-            )
+                    .padding(horizontal = 24.dp, vertical = HINT_VERTICAL_PADDING),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (level != null) {
+                    Text(
+                        text = levelLabel(level),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = branchAccent(level.branch),
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(LEVEL_LABEL_GAP))
+                }
+                Text(
+                    text = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SpaceColors.TextSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
         // Show the result card shortly after the game ends so the explosion or confetti is visible first.
@@ -138,26 +162,48 @@ fun GameScreen(vm: GameViewModel) {
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut(),
         ) {
-            ResultCard(
-                won = status == GameStatus.WON,
-                timeMillis = vm.finalTimeMillis,
-                newBest = vm.isNewBest,
-                bestMillis = vm.bestTimes[vm.boardSize],
-                compact = landscape,
-                onPlayAgain = { vm.restart() },
-                onMenu = { vm.backToMenu() },
-            )
+            when (config) {
+                is GameConfig.Free -> ResultCard(
+                    won = status == GameStatus.WON,
+                    timeMillis = vm.finalTimeMillis,
+                    newBest = vm.isNewBest,
+                    bestMillis = vm.bestTimes[config.size],
+                    compact = landscape,
+                    onPlayAgain = { vm.restart() },
+                    onMenu = { vm.backToMenu() },
+                )
+                is GameConfig.Level -> LevelResultCard(
+                    level = config.spec,
+                    won = status == GameStatus.WON,
+                    record = vm.lastRecord,
+                    timeMillis = vm.finalTimeMillis,
+                    hasNext = vm.nextLevel != null,
+                    compact = landscape,
+                    onNext = { vm.startNextLevel() },
+                    onPlayAgain = { vm.restart() },
+                    onMap = { vm.exitGame() },
+                )
+            }
         }
     }
 }
 
+/** "Walls · 7/20": branch name and the level's place in it. */
+@Composable
+private fun levelLabel(level: LevelSpec): String = stringResource(
+    R.string.campaign_level_label,
+    stringResource(branchNameRes(level.branch)),
+    level.number,
+    Campaign.levels(level.branch).size,
+)
+
 /**
  * Margins the ball has to stay clear of: system bars, the HUD (top row in portrait, side columns in
- * landscape) and the hint line at the bottom. The hint band is always reserved so the ball does not
- * jump when the hint disappears after the first move.
+ * landscape) and the hint line at the bottom, with the level label above it when [withLevelLabel].
+ * The band is always reserved so the ball does not jump when the hint disappears after the first move.
  */
 @Composable
-private fun rememberBallInsets(landscape: Boolean): ViewInsets {
+private fun rememberBallInsets(landscape: Boolean, withLevelLabel: Boolean): ViewInsets {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val safe = WindowInsets.safeDrawing
@@ -166,10 +212,12 @@ private fun rememberBallInsets(landscape: Boolean): ViewInsets {
     val safeRight = safe.getRight(density, layoutDirection).toFloat()
     val safeBottom = safe.getBottom(density).toFloat()
     val hintFontSize = MaterialTheme.typography.bodySmall.fontSize
-    return remember(landscape, density, safeLeft, safeTop, safeRight, safeBottom, hintFontSize) {
+    val labelFontSize = MaterialTheme.typography.titleSmall.fontSize
+    return remember(landscape, withLevelLabel, density, safeLeft, safeTop, safeRight, safeBottom, hintFontSize, labelFontSize) {
         with(density) {
             val hintLines = if (landscape) 1 else 2
-            val hintBand = HINT_VERTICAL_PADDING.toPx() * 2f + hintFontSize.toPx() * HINT_LINE_FACTOR * hintLines
+            val labelBand = if (withLevelLabel) labelFontSize.toPx() * HINT_LINE_FACTOR + LEVEL_LABEL_GAP.toPx() else 0f
+            val hintBand = HINT_VERTICAL_PADDING.toPx() * 2f + hintFontSize.toPx() * HINT_LINE_FACTOR * hintLines + labelBand
             if (landscape) {
                 val side = (HUD_EDGE_PADDING + HUD_SIDE_COLUMN_WIDTH).toPx()
                 ViewInsets(
@@ -194,6 +242,7 @@ private val HUD_EDGE_PADDING = 16.dp
 private val HUD_ROW_HEIGHT = 64.dp // 48 dp buttons plus 8 dp padding above and below
 private val HUD_SIDE_COLUMN_WIDTH = 112.dp
 private val HINT_VERTICAL_PADDING = 16.dp
+private val LEVEL_LABEL_GAP = 4.dp
 private const val HINT_LINE_FACTOR = 1.4f
 
 @Composable
@@ -284,12 +333,12 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
     val timeText = formatSeconds(vm.elapsedSeconds)
     val minesDescription = stringResource(R.string.hud_mines_remaining, mines)
     val timeDescription = stringResource(R.string.hud_time, timeText)
-    val menuDescription = stringResource(R.string.action_menu)
+    val menuDescription = stringResource(if (vm.config is GameConfig.Level) R.string.action_map else R.string.action_menu)
     val restartDescription = stringResource(R.string.action_restart)
 
     val menuButton: @Composable () -> Unit = {
         GlowIconButton(
-            onClick = { vm.backToMenu() },
+            onClick = { vm.exitGame() },
             contentDescription = menuDescription,
             accent = SpaceColors.Violet,
             icon = { drawMenuIcon(it) },
@@ -334,7 +383,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
             ) {
                 menuButton()
                 minesPill()
-                if (vm.boardSize.lives > 1) LivesPill(vm.livesLeft)
+                if (vm.config.lives > 1) LivesPill(vm.livesLeft)
             }
             Column(
                 modifier = Modifier.align(Alignment.TopEnd),
@@ -343,7 +392,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
             ) {
                 restartButton()
                 timePill()
-                if (vm.boardSize.hints > 0) HintPill(vm)
+                if (vm.config.hints > 0) HintPill(vm)
             }
         }
     } else {
@@ -433,6 +482,116 @@ private fun ResultCard(
                 onClick = onMenu,
                 modifier = Modifier.weight(1f),
                 primary = false,
+                accent = SpaceColors.Violet,
+            )
+        }
+    }
+}
+
+/**
+ * Result of a campaign level: the stars of this game, the best stars when they are higher, and the way
+ * on. After a win with a next level the card offers it first; otherwise it offers a replay and the map.
+ */
+@Composable
+private fun LevelResultCard(
+    level: LevelSpec,
+    won: Boolean,
+    record: RecordResult?,
+    timeMillis: Long,
+    hasNext: Boolean,
+    compact: Boolean,
+    onNext: () -> Unit,
+    onPlayAgain: () -> Unit,
+    onMap: () -> Unit,
+) {
+    val accent = if (won) SpaceColors.Success else SpaceColors.Danger
+    val shape = RoundedCornerShape(if (compact) 20.dp else 24.dp)
+    val earned = record?.earned ?: 0
+    val best = record?.best ?: earned
+    val maxStars = CampaignProgress.MAX_STARS
+    val gap = if (compact) 8.dp else 12.dp
+    val earnedDescription = stringResource(R.string.result_stars_desc, earned, maxStars)
+    Column(
+        modifier = Modifier
+            .widthIn(max = if (compact) 272.dp else 420.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .background(SpaceColors.Panel.copy(alpha = 0.9f))
+            .border(1.dp, accent.copy(alpha = 0.6f), shape)
+            .padding(if (compact) 14.dp else 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(if (won) R.string.result_won else R.string.result_lost),
+            style = MaterialTheme.typography.headlineSmall,
+            color = accent,
+        )
+        Text(
+            text = levelLabel(level),
+            style = MaterialTheme.typography.bodyMedium,
+            color = branchAccent(level.branch),
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(if (compact) 8.dp else 12.dp))
+        StarRow(
+            stars = earned,
+            starSize = if (compact) 26.dp else 32.dp,
+            modifier = Modifier.semantics { contentDescription = earnedDescription },
+        )
+        if (record != null && record.improved) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.result_new_star_record),
+                style = MaterialTheme.typography.titleMedium,
+                color = SpaceColors.Gold,
+            )
+        } else if (best > earned) {
+            Spacer(Modifier.height(4.dp))
+            val bestDescription = stringResource(R.string.result_best_stars_desc, best, maxStars)
+            Row(
+                modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = bestDescription },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.result_best_stars),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SpaceColors.TextSecondary,
+                )
+                Spacer(Modifier.width(6.dp))
+                StarRow(stars = best, starSize = 14.dp)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.result_time, formatDuration(timeMillis)),
+            style = MaterialTheme.typography.bodyMedium,
+            color = SpaceColors.TextSecondary,
+        )
+        Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
+        if (won && hasNext) {
+            GlowTextButton(
+                text = stringResource(R.string.action_next_level),
+                onClick = onNext,
+                modifier = Modifier.fillMaxWidth(),
+                primary = true,
+                accent = accent,
+            )
+            Spacer(Modifier.height(gap))
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            // Without a next level the map is the way on after a win, and a replay after a loss.
+            GlowTextButton(
+                text = stringResource(R.string.action_play_again),
+                onClick = onPlayAgain,
+                modifier = Modifier.weight(if (compact) 1.4f else 1f),
+                primary = !won,
+                accent = accent,
+            )
+            GlowTextButton(
+                text = stringResource(R.string.action_map_short),
+                onClick = onMap,
+                modifier = Modifier.weight(1f),
+                primary = won && !hasNext,
                 accent = SpaceColors.Violet,
             )
         }

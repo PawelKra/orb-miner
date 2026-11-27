@@ -49,6 +49,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -57,6 +59,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.spheresweeper.R
 import com.example.spheresweeper.logic.BoardSize
+import com.example.spheresweeper.logic.Campaign
+import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import com.example.spheresweeper.ui.theme.SpaceColors
@@ -99,6 +103,8 @@ fun MenuScreen(vm: GameViewModel) {
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 16.dp),
                 ) {
+                    CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
+                    Spacer(Modifier.height(20.dp))
                     BoardList(vm)
                 }
             }
@@ -118,6 +124,8 @@ fun MenuScreen(vm: GameViewModel) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     MenuHeader(orbGeometry, orbSize = 180.dp)
+                    Spacer(Modifier.height(20.dp))
+                    CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
                     Spacer(Modifier.height(20.dp))
                     BoardList(vm)
                     Spacer(Modifier.height(24.dp))
@@ -187,7 +195,7 @@ private fun MenuOrb(geometry: SphereGeometry, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ColumnScope.BoardList(vm: GameViewModel) {
-    SectionTitle(stringResource(R.string.menu_choose_board))
+    SectionTitle(stringResource(R.string.menu_free_play))
     val sizes = BoardSize.values()
     for (index in sizes.indices) {
         val boardSize = sizes[index]
@@ -296,6 +304,58 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
                 )
             }
         }
+    }
+}
+
+/** Entry to the campaign map with the completed levels and the stars collected so far. */
+@Composable
+private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    val accent = SpaceColors.Gold
+    val levelCount = Campaign.all.size
+    val completed = Campaign.all.count { progress.isCompleted(it) }
+    val stars = progress.totalStars
+    val maxStars = levelCount * CampaignProgress.MAX_STARS
+    val starsDescription = stringResource(R.string.campaign_stars_total_desc, stars, maxStars)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(accent.copy(alpha = 0.18f), SpaceColors.Violet.copy(alpha = 0.14f), SpaceColors.Panel.copy(alpha = 0.75f)),
+                ),
+            )
+            .border(1.dp, accent.copy(alpha = 0.55f), shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(38.dp)) { drawStarIcon(accent) }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.campaign_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = SpaceColors.TextPrimary,
+            )
+            Text(
+                text = stringResource(R.string.campaign_card_subtitle, completed, levelCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = SpaceColors.TextSecondary,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = stringResource(R.string.campaign_stars_total, stars, maxStars),
+            style = TextStyle(
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                fontFeatureSettings = "tnum",
+                color = accent,
+            ),
+            modifier = Modifier.semantics { contentDescription = starsDescription },
+        )
     }
 }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -306,4 +307,69 @@ fun DrawScope.drawFlagIcon(color: Color) {
         close()
     }
     drawPath(cloth, color)
+}
+
+/** Five-pointed star: "campaign star". With [filled] false only the outline is drawn. */
+fun DrawScope.drawStarIcon(color: Color, filled: Boolean = true) {
+    val outer = size.minDimension * 0.5f
+    val inner = outer * 0.45f
+    // The star reaches 0.81 * outer below its centre, so it is moved down to sit in the middle.
+    val cx = center.x
+    val cy = center.y + outer * 0.095f
+    val star = Path()
+    for (k in 0 until 10) {
+        val r = if (k % 2 == 0) outer else inner
+        val angle = (-PI / 2.0 + k * PI / 5.0).toFloat()
+        val x = cx + cos(angle) * r
+        val y = cy + sin(angle) * r
+        if (k == 0) star.moveTo(x, y) else star.lineTo(x, y)
+    }
+    star.close()
+    if (filled) {
+        drawPath(star, color)
+    } else {
+        drawPath(star, color, style = Stroke(width = size.minDimension * 0.08f, join = StrokeJoin.Round))
+    }
+}
+
+/** Padlock: "locked". */
+fun DrawScope.drawLockIcon(color: Color) {
+    val w = size.minDimension
+    val stroke = w * 0.12f
+    drawArc(
+        color = color,
+        startAngle = 180f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(w * 0.28f, w * 0.1f),
+        size = Size(w * 0.44f, w * 0.44f),
+        style = Stroke(width = stroke, cap = StrokeCap.Round),
+    )
+    drawLine(color = color, start = Offset(w * 0.28f, w * 0.32f), end = Offset(w * 0.28f, w * 0.48f), strokeWidth = stroke)
+    drawLine(color = color, start = Offset(w * 0.72f, w * 0.32f), end = Offset(w * 0.72f, w * 0.48f), strokeWidth = stroke)
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(w * 0.16f, w * 0.44f),
+        size = Size(w * 0.68f, w * 0.48f),
+        cornerRadius = CornerRadius(w * 0.1f, w * 0.1f),
+    )
+}
+
+/** Arrow pointing left: "back". */
+fun DrawScope.drawBackIcon(color: Color) {
+    val w = size.minDimension
+    val stroke = w * 0.12f
+    drawLine(
+        color = color,
+        start = Offset(w * 0.86f, w * 0.5f),
+        end = Offset(w * 0.18f, w * 0.5f),
+        strokeWidth = stroke,
+        cap = StrokeCap.Round,
+    )
+    val head = Path().apply {
+        moveTo(w * 0.46f, w * 0.2f)
+        lineTo(w * 0.16f, w * 0.5f)
+        lineTo(w * 0.46f, w * 0.8f)
+    }
+    drawPath(head, color, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }

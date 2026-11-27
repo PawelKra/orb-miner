@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.spheresweeper.ui.CampaignScreen
 import com.example.spheresweeper.ui.GameScreen
 import com.example.spheresweeper.ui.GameViewModel
 import com.example.spheresweeper.ui.MenuScreen
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
                     ) { screen ->
                         when (screen) {
                             Screen.MENU -> MenuScreen(vm)
+                            Screen.CAMPAIGN -> CampaignScreen(vm)
                             Screen.GAME -> GameScreen(vm)
                         }
                     }

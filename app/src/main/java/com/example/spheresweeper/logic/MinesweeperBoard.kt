@@ -182,6 +182,30 @@ class MinesweeperBoard(
         return false
     }
 
+    /**
+     * Starts the game on a prepared layout instead of a random one: places mines at exactly [mines]
+     * (duplicates count once, [mineCount] becomes their number) and reveals [start] like [reveal].
+     * Meant for layouts from [NoGuessGenerator]. A flag on [start] is removed first, since the cell
+     * is known to be safe. Must be called before mines are placed.
+     *
+     * @throws IllegalStateException when mines are already placed.
+     * @throws IllegalArgumentException when a cell is out of range or [start] is among [mines].
+     */
+    fun startWith(mines: IntArray, start: Int): MoveResult {
+        check(!minesPlaced) { "mines are already placed" }
+        require(start in 0 until cellCount) { "start $start out of range" }
+        for (cell in mines) {
+            require(cell in 0 until cellCount) { "mine $cell out of range" }
+            require(cell != start) { "start $start is a mine" }
+        }
+        if (flagged[start]) {
+            flagged[start] = false
+            flagCount--
+        }
+        placeMinesAt(mines)
+        return reveal(start)
+    }
+
     /** Test hook: place mines at exactly these cells and switch to PLAYING. */
     internal fun placeMinesAt(mineCells: IntArray) {
         mine.fill(false)

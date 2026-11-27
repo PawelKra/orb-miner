@@ -14,9 +14,14 @@ import androidx.lifecycle.AndroidViewModel
 import com.example.spheresweeper.data.GamePreferences
 import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.BoardSize
+import com.example.spheresweeper.logic.Campaign
+import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.GameStatus
+import com.example.spheresweeper.logic.LevelSpec
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.MoveResult
+import com.example.spheresweeper.logic.NoGuessGenerator
+import com.example.spheresweeper.logic.RecordResult
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import kotlinx.coroutines.CoroutineScope
@@ -30,11 +35,39 @@ import kotlinx.coroutines.withContext
 import kotlin.math.acos
 import kotlin.math.sqrt
 
-enum class Screen { MENU, GAME }
+enum class Screen { MENU, CAMPAIGN, GAME }
+
+/**
+ * What the current game is played on: a free game on a [BoardSize] or a fixed campaign level.
+ * The numbers the game needs before a board exists come from here.
+ */
+sealed class GameConfig {
+    abstract val frequency: Int
+    abstract val mines: Int
+    abstract val lives: Int
+    abstract val hints: Int
+
+    /** Free game: a new random board of [size] on every start. */
+    data class Free(val size: BoardSize) : GameConfig() {
+        override val frequency: Int get() = size.frequency
+        override val mines: Int get() = size.mines
+        override val lives: Int get() = size.lives
+        override val hints: Int get() = size.hints
+    }
+
+    /** Campaign level: the same board on every start, built by [Campaign.buildLevel]. */
+    data class Level(val spec: LevelSpec) : GameConfig() {
+        override val frequency: Int get() = spec.frequency
+        override val mines: Int get() = spec.mines
+        override val lives: Int get() = spec.lives
+        override val hints: Int get() = spec.hints
+    }
+}
 
 /**
  * Holds the whole game state so it survives configuration changes (device rotation):
- * current screen, board, timer, settings, best times and the ball orientation and zoom.
+ * current screen, board, timer, settings, best times, campaign progress and the ball orientation
+ * and zoom.
  */
 class GameViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -43,7 +76,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     // Own main-thread scope, cancelled in onCleared().
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private val geometryCache = HashMap<BoardSize, SphereGeometry>()
+    /** Geometries by subdivision frequency; free games and levels of the same frequency share one. */
+    private val geometryCache = HashMap<Int, SphereGeometry>()
     private var loadJob: Job? = null
     private var tickerJob: Job? = null
     private var focusJob: Job? = null
@@ -53,7 +87,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var screen by mutableStateOf(Screen.MENU)
         private set
 
-    var boardSize by mutableStateOf(BoardSize.SMALL)
+    /** Board size or campaign level of the current (or last) game. */
+    var config by mutableStateOf<GameConfig>(GameConfig.Free(BoardSize.SMALL))
         private set
 
     var geometry by mutableStateOf<SphereGeometry?>(null)
@@ -72,6 +107,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Bumped after every change of the (mutable) board so Compose redraws. */
     var boardVersion by mutableIntStateOf(0)
+        private set
+
+    /**
+     * False until the player's first move in this game (reveal, flag, chord or hint). The game opens
+     * on a start area already revealed, so the status is PLAYING before that; the help line stays
+     * and the timer waits until the player acts.
+     */
+    var playerMoved by mutableStateOf(false)
         private set
 
     /** Identifies the current game; delayed taps from an older game are ignored. */
@@ -119,6 +162,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         it.putAll(prefs.loadBestTimes())
     }
 
+    /** Best stars per campaign level. */
+    var progress by mutableStateOf(CampaignProgress.parse(prefs.campaignProgress))
+        private set
+
+    /** Stars of the finished campaign game, for the result card; null in free games and while playing. */
+    var lastRecord by mutableStateOf<RecordResult?>(null)
+        private set
+
     private var timerStartRealtime = 0L
 
     /** Current status; reading it subscribes the caller to board changes. */
@@ -132,23 +183,47 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     val minesRemaining: Int
         get() {
             boardVersion
-            return board?.minesRemaining ?: boardSize.mines
+            return board?.minesRemaining ?: config.mines
         }
 
     /** Lives not yet lost; reading it subscribes the caller to board changes. */
     val livesLeft: Int
         get() {
             boardVersion
-            return board?.livesLeft ?: boardSize.lives
+            return board?.livesLeft ?: config.lives
+        }
+
+    /** The level after the current one if it is open, or null (free game, last level of a branch). */
+    val nextLevel: LevelSpec?
+        get() {
+            val level = (config as? GameConfig.Level)?.spec ?: return null
+            return Campaign.next(level)?.takeIf { progress.isUnlocked(it) }
         }
 
     // ---------------------------------------------------------------- navigation
 
+    /** Starts a free game on [size]. */
     fun startGame(size: BoardSize) {
-        boardSize = size
+        start(GameConfig.Free(size))
+    }
+
+    /** Starts campaign [level]; a locked level is ignored. */
+    fun startLevel(level: LevelSpec) {
+        if (!progress.isUnlocked(level)) return
+        start(GameConfig.Level(level))
+    }
+
+    /** Starts the level after the current one, if it is open. */
+    fun startNextLevel() {
+        nextLevel?.let { startLevel(it) }
+    }
+
+    private fun start(newConfig: GameConfig) {
+        config = newConfig
         screen = Screen.GAME
         zoom = 1f
-        val cached = geometryCache[size]
+        lastRecord = null
+        val cached = geometryCache[newConfig.frequency]
         loadJob?.cancel()
         if (cached != null) {
             geometry = cached
@@ -159,18 +234,27 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             layout = null
             stopTimer()
             loadJob = scope.launch {
-                val built = withContext(Dispatchers.Default) { SphereGeometry.build(size.frequency) }
-                geometryCache[size] = built
-                if (boardSize == size) {
+                // The first game is generated together with the geometry, off the main thread.
+                val (built, game) = withContext(Dispatchers.Default) {
+                    val g = SphereGeometry.build(newConfig.frequency)
+                    g to prepareGame(g, newConfig)
+                }
+                geometryCache[newConfig.frequency] = built
+                if (config == newConfig) {
                     geometry = built
-                    newBoard()
+                    newBoard(game)
                 }
             }
         }
     }
 
+    /** New board for the same config; a campaign level comes back exactly as it was. */
     fun restart() {
         if (geometry != null) newBoard()
+    }
+
+    fun openCampaign() {
+        screen = Screen.CAMPAIGN
     }
 
     fun backToMenu() {
@@ -179,9 +263,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         screen = Screen.MENU
     }
 
+    /** Leaves the game screen: to the campaign map after a level, to the menu after a free game. */
+    fun exitGame() {
+        loadJob?.cancel()
+        stopTimer()
+        screen = if (config is GameConfig.Level) Screen.CAMPAIGN else Screen.MENU
+    }
+
     /** Geometry for decorative use (menu orb); built synchronously, cheap for small sizes. */
     fun geometryFor(size: BoardSize): SphereGeometry =
-        geometryCache.getOrPut(size) { SphereGeometry.build(size.frequency) }
+        geometryCache.getOrPut(size.frequency) { SphereGeometry.build(size.frequency) }
 
     // ---------------------------------------------------------------- settings
 
@@ -264,14 +355,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return best
     }
 
-    /** Turns the ball over [FOCUS_MILLIS] so that [cell] ends up in the middle of the view. */
-    private fun focusOn(g: SphereGeometry, cell: Int) {
+    /**
+     * Turns the ball so that [cell] ends up in the middle of the view: over [FOCUS_MILLIS], or at once
+     * when [animate] is false. The animated turn skips cells already near the middle.
+     */
+    private fun focusOn(g: SphereGeometry, cell: Int, animate: Boolean = true) {
         orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
         val px = scratch[0]
         val py = scratch[1]
         val pz = scratch[2].coerceIn(-1f, 1f)
         val total = acos(pz)
-        if (total < FOCUS_MIN_ANGLE) return
+        if (animate && total < FOCUS_MIN_ANGLE) return
         // Axis p x (0, 0, 1); for a cell straight behind the ball any axis in the screen plane works.
         var ax = py
         var ay = -px
@@ -280,6 +374,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             ay = 0f
         }
         focusJob?.cancel()
+        focusJob = null
+        if (!animate) {
+            focusRotation.setFromAxisAngle(ax, ay, 0f, total)
+            orientation.preMultiply(focusRotation).normalize()
+            notifyOrientationChanged()
+            return
+        }
         focusJob = scope.launch {
             val start = SystemClock.uptimeMillis()
             var done = 0f
@@ -307,6 +408,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun toggleFlagOn(b: MinesweeperBoard, cell: Int): Feedback {
         if (!b.toggleFlag(cell)) return Feedback.NONE
+        onPlayerMove()
         boardVersion++
         return Feedback.FLAG
     }
@@ -319,9 +421,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun afterMove(result: MoveResult, success: Feedback): Feedback {
         if (result == MoveResult.NOTHING) return Feedback.NONE
         val b = board
-        if (b != null && b.status != GameStatus.READY && timerStartRealtime == 0L) {
-            startTimer()
-        }
+        onPlayerMove()
         boardVersion++
         return when (result) {
             MoveResult.NOTHING -> Feedback.NONE
@@ -341,25 +441,61 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Marks that the player has acted in this game; the first move starts the timer. */
+    private fun onPlayerMove() {
+        playerMoved = true
+        if (timerStartRealtime == 0L) startTimer()
+    }
+
     // ---------------------------------------------------------------- lifecycle of a game
 
-    private fun newBoard() {
+    /** Walls, far cells and a board already opened at [start], ready to be shown. */
+    private class PreparedGame(val layout: BoardLayout, val board: MinesweeperBoard, val start: Int)
+
+    /**
+     * Builds a game for [forConfig] on [g] (which has its frequency) without touching view-model
+     * state, so it can run on any thread. Mines come from [NoGuessGenerator], which guarantees that
+     * the whole board can be solved from the start cell by logic alone, and the start cell is
+     * revealed right away. A free game draws a new board every time; a level is built from its seed.
+     */
+    private fun prepareGame(g: SphereGeometry, forConfig: GameConfig): PreparedGame = when (forConfig) {
+        is GameConfig.Free -> {
+            val size = forConfig.size
+            val newLayout = BoardLayout.generate(g, size)
+            val generated = NoGuessGenerator.generate(newLayout.scopes, size.mines)
+            val started = MinesweeperBoard(newLayout.scopes, size.mines, lives = size.lives)
+            started.startWith(generated.mines, generated.start)
+            PreparedGame(newLayout, started, generated.start)
+        }
+        is GameConfig.Level -> {
+            val level = Campaign.buildLevel(forConfig.spec, g)
+            PreparedGame(level.layout, level.board, level.start)
+        }
+    }
+
+    /**
+     * Shows a new game: [prepared] if given (built for the current [geometry] and [config]),
+     * otherwise one generated here. Board and [gameId] change together, so moves meant for the old
+     * board are ignored. The ball turns at once so the start cell faces the player, and a hint pulse
+     * marks it.
+     */
+    private fun newBoard(prepared: PreparedGame? = null) {
         val g = geometry ?: return
+        val game = prepared ?: prepareGame(g, config)
         stopTimer()
         timerStartRealtime = 0L
         elapsedSeconds = 0L
         finalTimeMillis = 0L
         isNewBest = false
-        effect = SphereEffect.NONE
-        effectStartNanos = 0L
-        effectCell = -1
-        focusJob?.cancel()
-        hintsLeft = boardSize.hints
-        val newLayout = BoardLayout.generate(g, boardSize)
-        layout = newLayout
-        board = MinesweeperBoard(newLayout.scopes, boardSize.mines, lives = boardSize.lives)
+        lastRecord = null
+        playerMoved = false
+        hintsLeft = config.hints
+        layout = game.layout
+        board = game.board
         gameId++
         boardVersion++
+        focusOn(g, game.start, animate = false)
+        startEffect(SphereEffect.HINT, game.start)
     }
 
     private fun startTimer() {
@@ -391,14 +527,33 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         finalTimeMillis = elapsed
         elapsedSeconds = elapsed / 1000L
         startEffect(if (won) SphereEffect.WIN else SphereEffect.EXPLOSION, -1)
-        if (won) {
-            val previous = bestTimes[boardSize]
-            if (previous == null || elapsed < previous) {
-                bestTimes[boardSize] = elapsed
-                prefs.saveBestTime(boardSize, elapsed)
-                isNewBest = true
+        when (val current = config) {
+            is GameConfig.Free -> if (won) {
+                val size = current.size
+                val previous = bestTimes[size]
+                if (previous == null || elapsed < previous) {
+                    bestTimes[size] = elapsed
+                    prefs.saveBestTime(size, elapsed)
+                    isNewBest = true
+                }
             }
+            is GameConfig.Level -> recordLevel(current.spec, won)
         }
+    }
+
+    /**
+     * Stores the stars of a finished level. A loss earns none and leaves the progress as it is, but
+     * still yields a [RecordResult] so the result card can show the best stars so far.
+     */
+    private fun recordLevel(level: LevelSpec, won: Boolean) {
+        val b = board ?: return
+        val hintsUsed = (config.hints - hintsLeft).coerceAtLeast(0)
+        val result = progress.record(level, won, livesLost = b.detonatedCount, hintsUsed = hintsUsed)
+        if (result.improved) {
+            progress = result.progress
+            prefs.campaignProgress = result.progress.serialize()
+        }
+        lastRecord = result
     }
 
     private fun startEffect(newEffect: SphereEffect, cell: Int) {

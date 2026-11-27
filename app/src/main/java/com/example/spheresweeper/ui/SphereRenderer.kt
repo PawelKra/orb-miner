@@ -34,7 +34,9 @@ import kotlin.random.Random
  * they lie on the surface and rotate with the ball. Flags and mines keep a fixed frame on the ball.
  * Digits turn with the view: each frame their baseline snaps to the cell edge that is most horizontal
  * on screen, so they stay as upright as the cell shape allows. Far cells show their number in gold
- * inside a gold ring. Walls are glowing lines along cell edges, drawn on top of the cells.
+ * inside a gold ring. Line cells show their number in turquoise with an arrow fixed on the ball that
+ * points at the edge their row starts through; once revealed, a faint line runs through the row.
+ * Walls are glowing lines along cell edges, drawn on top of the cells and the row lines.
  *
  * Everything that depends only on the geometry (cell sizes, tangent frames, colours, glyph metrics,
  * confetti parameters, shaders, paints) is computed once in the constructor. [draw] works on
@@ -88,6 +90,15 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
     private val path = Path()
 
+    /** Line-cell arrowhead in decal space pointing up (towards -y), built once. */
+    private val arrowPath = Path().apply {
+        moveTo(0f, -LINE_ARROW_TIP)
+        lineTo(LINE_ARROW_HALF_WIDTH, -LINE_ARROW_BASE)
+        lineTo(0f, -LINE_ARROW_NOTCH)
+        lineTo(-LINE_ARROW_HALF_WIDTH, -LINE_ARROW_BASE)
+        close()
+    }
+
     /** Flag pennant in decal space, built once. */
     private val pennantPath = Path().apply {
         moveTo(FLAG_POLE_X, FLAG_TOP)
@@ -116,9 +127,20 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         strokeCap = Paint.Cap.ROUND
     }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val arrowOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val rowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
 
     /** Wall stroke width in model units, derived from the mean cell size. */
     private val wallWidth: Float
+
+    /** Stroke width of the line through a line cell's row, in model units. */
+    private val rowWidth: Float
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val iconStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -133,6 +155,9 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
     /** Per-number scale that fits the number inside the ring of a far cell. */
     private val farScale = FloatArray(MAX_NUMBER + 1)
+
+    /** Per-number scale that keeps the number of a line cell clear of its arrow. */
+    private val lineScale = FloatArray(MAX_NUMBER + 1)
 
     // Unit-radius shaders, positioned and scaled through the canvas matrix.
     private val haloShader = RadialGradient(
@@ -232,6 +257,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         var radiusSum = 0f
         for (i in 0 until cellCount) radiusSum += cellRadius[i]
         wallWidth = radiusSum / max(1, cellCount) * WALL_WIDTH_PER_RADIUS
+        rowWidth = radiusSum / max(1, cellCount) * ROW_WIDTH_PER_RADIUS
 
         // Digit size: ink height of the digits is a fixed share of the inscribed diameter.
         val bounds = Rect()
@@ -246,6 +272,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             digitY[n] = -(bounds.top + bounds.bottom) * 0.5f
             val halfDiagonal = 0.5f * sqrt((bounds.width() * bounds.width() + bounds.height() * bounds.height()).toFloat())
             farScale[n] = min(FAR_MAX_SCALE, FAR_TEXT_RADIUS / max(1f, halfDiagonal))
+            lineScale[n] = min(LINE_MAX_SCALE, LINE_TEXT_RADIUS / max(1f, halfDiagonal))
         }
 
         val random = Random(CONFETTI_SEED)
@@ -367,7 +394,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         for (k in 0 until visible) {
             drawCell(canvas, order[k], board, status, layout)
         }
-        if (layout != null) drawWalls(canvas, layout)
+        if (layout != null) {
+            if (board != null) drawLineRows(canvas, layout, board)
+            drawWalls(canvas, layout)
+        }
 
         drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
 
@@ -548,6 +578,50 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         )
     }
 
+    /**
+     * Decal fixed on the ball whose up axis points from the centre of [cell] towards the middle of its
+     * edge [side] (the edge from corner cornerStart[cell] + side to the next corner), in the tangent
+     * plane. Returns false for an invalid side or a degenerate frame.
+     */
+    private fun setupEdgeDecal(cell: Int, side: Int): Boolean {
+        val start = cornerStart[cell]
+        val count = cornerStart[cell + 1] - start
+        if (side < 0 || side >= count) return false
+        val a = (start + side) * 3
+        val b = (start + (side + 1) % count) * 3
+        val o = cell * 3
+        val cx = centers[o]
+        val cy = centers[o + 1]
+        val cz = centers[o + 2]
+        // Edge midpoint relative to the centre, projected onto the tangent plane at the unit centre c.
+        var ux = (corners[a] + corners[b]) * 0.5f - cx
+        var uy = (corners[a + 1] + corners[b + 1]) * 0.5f - cy
+        var uz = (corners[a + 2] + corners[b + 2]) * 0.5f - cz
+        val dot = ux * cx + uy * cy + uz * cz
+        ux -= dot * cx
+        uy -= dot * cy
+        uz -= dot * cz
+        val len = sqrt(ux * ux + uy * uy + uz * uz)
+        if (len < 1e-6f) return false
+        ux /= len
+        uy /= len
+        uz /= len
+        // right = up x c, as in buildTangentFrame, so the decal is not mirrored.
+        val rx = uy * cz - uz * cy
+        val ry = uz * cx - ux * cz
+        val rz = ux * cy - uy * cx
+        val m = matrix
+        return setupDecalFrame(
+            cell,
+            m[0] * rx + m[1] * ry + m[2] * rz,
+            m[3] * rx + m[4] * ry + m[5] * rz,
+            m[6] * rx + m[7] * ry + m[8] * rz,
+            m[0] * ux + m[1] * uy + m[2] * uz,
+            m[3] * ux + m[4] * uy + m[5] * uz,
+            m[6] * ux + m[7] * uy + m[8] * uz,
+        )
+    }
+
     /** |sin| of the screen angle between edge (a, b) and the horizontal; MAX_VALUE for a degenerate edge. */
     private fun edgeSlope(a: Int, b: Int): Float {
         val dx = cellScreen[b * 2] - cellScreen[a * 2]
@@ -655,6 +729,8 @@ class SphereRenderer(private val geometry: SphereGeometry) {
                 val n = board.adjacentMines(cell)
                 if (layout != null && layout.isFar(cell)) {
                     drawFarDecal(canvas, cell, n, decalAlpha)
+                } else if (layout != null && layout.isLine(cell)) {
+                    drawLineDecal(canvas, cell, n, layout.lineSide(cell), decalAlpha)
                 } else if (n in 1..MAX_NUMBER) {
                     drawDigitDecal(canvas, cell, n, decalAlpha)
                 }
@@ -730,6 +806,87 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             canvas.drawText(text, 0, text.length, x, y, textPaint)
         }
         canvas.restore()
+    }
+
+    /**
+     * Line cell: turquoise number, scaled to stay clear of the arrow, and an arrow at the edge [side]
+     * the counted row starts through. A zero shows the arrow alone.
+     */
+    private fun drawLineDecal(canvas: Canvas, cell: Int, n: Int, side: Int, alpha: Float) {
+        if (alpha < MIN_DECAL_ALPHA) return
+        if (n in 1..MAX_NUMBER && setupAlignedDecal(cell)) {
+            canvas.save()
+            canvas.concat(decalMatrix)
+            val s = lineScale[n]
+            canvas.scale(s, s)
+            val text = DIGITS[n]
+            val x = digitX[n]
+            val y = digitY[n]
+            textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+            canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
+            textPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+            canvas.drawText(text, 0, text.length, x, y, textPaint)
+            canvas.restore()
+        }
+        if (!setupEdgeDecal(cell, side)) return
+        canvas.save()
+        canvas.concat(decalMatrix)
+        // A dark outline keeps the arrow readable on light and dark cells alike.
+        arrowOutlinePaint.strokeWidth = LINE_ARROW_OUTLINE
+        arrowOutlinePaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+        canvas.drawPath(arrowPath, arrowOutlinePaint)
+        iconPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+        canvas.drawPath(arrowPath, iconPaint)
+        canvas.restore()
+    }
+
+    // ------------------------------------------------------------------ line rows
+
+    /**
+     * For every revealed line cell, a thin translucent line from its arrow edge through the centres of
+     * the cells its number counts. Segments fade towards the horizon like the walls.
+     */
+    private fun drawLineRows(canvas: Canvas, layout: BoardLayout, board: MinesweeperBoard) {
+        for (cell in 0 until cellCount) {
+            if (!layout.isLine(cell) || !board.isRevealed(cell)) continue
+            val row = layout.linePath(cell)
+            if (row.isEmpty()) continue
+            val o = cell * 3
+            val first = row[0]
+            val f = first * 3
+            // Start halfway to the first row cell, at the edge the arrow points at.
+            var ax = (rotated[o] + rotated[f]) * 0.5f
+            var ay = (rotated[o + 1] + rotated[f + 1]) * 0.5f
+            var az = (rotated[o + 2] + rotated[f + 2]) * 0.5f
+            var fa = min(facing[cell], facing[first])
+            for (k in 0 until row.size) {
+                val next = row[k]
+                val q = next * 3
+                val bx = rotated[q]
+                val by = rotated[q + 1]
+                val bz = rotated[q + 2]
+                val fb = facing[next]
+                drawRowSegment(canvas, ax, ay, az, fa, bx, by, bz, fb)
+                ax = bx
+                ay = by
+                az = bz
+                fa = fb
+            }
+        }
+    }
+
+    /** One row segment between rotated points a and b with facing values [fa] and [fb]. */
+    private fun drawRowSegment(
+        canvas: Canvas, ax: Float, ay: Float, az: Float, fa: Float, bx: Float, by: Float, bz: Float, fb: Float,
+    ) {
+        val alpha = MathUtils.smoothstep(DECAL_FADE_START, DECAL_FADE_END, min(fa, fb)) * ROW_ALPHA
+        if (alpha < MIN_DECAL_ALPHA) return
+        val d = SphereCamera.DISTANCE
+        val sa = frameFocal / (d - az)
+        val sb = frameFocal / (d - bz)
+        rowPaint.strokeWidth = rowWidth * (sa + sb) * 0.5f
+        rowPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+        canvas.drawLine(frameCx + ax * sa, frameCy - ay * sa, frameCx + bx * sb, frameCy - by * sb, rowPaint)
     }
 
     // ------------------------------------------------------------------ walls
@@ -937,6 +1094,20 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private const val FAR_TEXT_RADIUS = 66f
         private const val FAR_MAX_SCALE = 0.9f
 
+        // Line cells: number scaled to fit within LINE_TEXT_RADIUS, arrowhead between the number and
+        // the edge (decal units, the edge itself lies at DECAL_HALF or a little farther).
+        private const val LINE_TEXT_RADIUS = 56f
+        private const val LINE_MAX_SCALE = 0.8f
+        private const val LINE_ARROW_TIP = 92f
+        private const val LINE_ARROW_NOTCH = 68f
+        private const val LINE_ARROW_BASE = 60f
+        private const val LINE_ARROW_HALF_WIDTH = 30f
+        private const val LINE_ARROW_OUTLINE = 9f
+
+        // Row lines: thin and translucent, width relative to the mean cell radius.
+        private const val ROW_WIDTH_PER_RADIUS = 0.045f
+        private const val ROW_ALPHA = 0.4f
+
         // Walls: core width relative to the mean cell radius, glow width relative to the core.
         private const val WALL_WIDTH_PER_RADIUS = 0.07f
         private const val WALL_GLOW_FACTOR = 3.2f
@@ -1034,6 +1205,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private val DIGIT_SHADOW_COLOR = argbLong(0xFF000000)
         private val TINT_COLOR = argbLong(0xFFFF2040)
         private val FAR_COLOR = argbLong(0xFFFFD166)
+        private val LINE_COLOR = argbLong(0xFF7DF9E1)
         private val WALL_CORE_COLOR = argbLong(0xFFFFF3D6)
         private val WALL_GLOW_COLOR = argbLong(0xFFFF9A3C)
         private val HINT_COLOR = argbLong(0xFF4FE3FF)

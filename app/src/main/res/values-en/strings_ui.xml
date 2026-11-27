@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="menu_subtitle">Minesweeper on a hexagon sphere</string>
-    <string name="menu_choose_board">Choose a board</string>
 
     <string name="board_tiny">Tiny</string>
     <string name="board_small">Small</string>
@@ -54,6 +53,38 @@
     <string name="result_lost_subtitle">A mine exploded. Try again.</string>
     <string name="result_time">Time: %1$s</string>
     <string name="result_new_best">New best time!</string>
+
+    <string name="menu_free_play">Free play</string>
+
+    <string name="campaign_title">Campaign</string>
+    <string name="campaign_card_subtitle">Levels completed: %1$d/%2$d</string>
+    <string name="campaign_stars_total">★ %1$d/%2$d</string>
+    <string name="campaign_stars_total_desc">Stars: %1$d of %2$d</string>
+    <string name="branch_trunk">Basics</string>
+    <string name="branch_walls">Walls</string>
+    <string name="branch_far">Far reach</string>
+    <string name="branch_lines">Lines</string>
+    <string name="branch_mixed">Mixed</string>
+    <string name="campaign_fraction">%1$d/%2$d</string>
+    <string name="campaign_branch_progress_desc">%1$s, levels completed: %2$d of %3$d</string>
+    <string name="campaign_branch_locked_desc">%1$s, locked branch</string>
+    <string name="campaign_unlock_after_trunk">Complete every Basics level to open this branch.</string>
+    <string name="campaign_unlock_mixed">Complete at least %1$d of the %2$d levels in each of Walls, Far reach and Lines.</string>
+    <string name="campaign_feeder_progress">%1$s %2$d/%3$d</string>
+    <string name="campaign_node_desc">%1$s, level %2$d: %3$s</string>
+    <string name="campaign_node_locked">locked</string>
+    <string name="campaign_node_not_completed">not completed</string>
+    <string name="campaign_node_stars">%1$d of %2$d stars</string>
+    <string name="campaign_level_label">%1$s · %2$d/%3$d</string>
+    <string name="action_back">Back</string>
+    <string name="action_map">Back to the campaign map</string>
+    <string name="action_map_short">Map</string>
+    <string name="action_next_level">Next level</string>
+
+    <string name="result_stars_desc">Stars earned: %1$d of %2$d</string>
+    <string name="result_best_stars">Best</string>
+    <string name="result_best_stars_desc">Best result: %1$d of %2$d stars</string>
+    <string name="result_new_star_record">New star record!</string>
 
     <string name="loading">Building the sphere…</string>
 </resources>

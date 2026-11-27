@@ -3,15 +3,22 @@ package com.example.spheresweeper.logic
 import kotlin.random.Random
 
 /**
- * Per-game board features on top of the fixed [SphereGeometry]: walls and far-reaching cells.
+ * Per-game board features on top of the fixed [SphereGeometry]: walls, far-reaching cells and line cells.
  *
  * A wall is a chain of cell edges. Two cells separated by a wall do not see each other: the number of
  * one does not count a mine in the other, and reveals do not spread across. [links] is the neighbour
  * graph with those pairs removed.
  *
  * A far cell's number counts every cell reachable in at most two steps through [links], so a wall
- * blocks that view too. [scopes] lists, for every cell, the cells its number counts; it is what
- * [MinesweeperBoard] uses as its neighbour lists.
+ * blocks that view too.
+ *
+ * A line cell's number counts the cells of one straight row instead of its neighbours. The row starts
+ * at the neighbour across one edge of the cell and keeps going straight: it enters each hexagon through
+ * one edge and leaves through the opposite one (see [straightRow]). A wall, a pentagon or the length
+ * limit ends it.
+ *
+ * [scopes] lists, for every cell, the cells its number counts; it is what [MinesweeperBoard] uses as
+ * its neighbour lists.
  */
 class BoardLayout private constructor(
     /** Each wall as a polyline of corner indices into [SphereGeometry.corners] (index k = x,y,z at 3k). */
@@ -21,28 +28,63 @@ class BoardLayout private constructor(
     val links: Array<IntArray>,
     /** scopes[i] = cells whose mines the number on i counts, sorted ascending. */
     val scopes: Array<IntArray>,
+    /** Per cell: the edge a line cell's row leaves through (see [lineSide]), -1 for other cells. */
+    private val lineSides: IntArray,
+    /** Per cell: the row of a line cell in order from the cell outwards, empty for other cells. */
+    private val linePaths: Array<IntArray>,
 ) {
     fun isFar(cell: Int): Boolean = far[cell]
 
     val farCount: Int get() = far.count { it }
 
+    fun isLine(cell: Int): Boolean = lineSides[cell] >= 0
+
+    /**
+     * Edge of a line cell its row starts through, as an index 0 until cornerCount(cell): the edge runs
+     * from corner cornerStart[cell] + side to the next corner of the cell. -1 for other cells.
+     */
+    fun lineSide(cell: Int): Int = lineSides[cell]
+
+    /** Cells of the row a line cell counts, ordered from the cell outwards; empty for other cells. */
+    fun linePath(cell: Int): IntArray = linePaths[cell]
+
+    val lineCount: Int get() = lineSides.count { it >= 0 }
+
     companion object {
         private const val WALL_ATTEMPTS = 60
+
+        private const val HEXAGON_SIDES = 6
 
         /** Most wall edges a single cell may have; keeps walls from wrapping tightly around one cell. */
         private const val MAX_WALL_EDGES_PER_CELL = 2
 
-        /** Plain board: no walls, no far cells. */
+        /** Shortest row a line cell may count; shorter rows would make it a weak, odd-looking clue. */
+        const val MIN_LINE_LENGTH = 3
+
+        private val NO_CELLS = IntArray(0)
+
+        /** Plain board: no walls, no far cells, no line cells. */
         fun classic(geometry: SphereGeometry): BoardLayout =
-            BoardLayout(emptyArray(), BooleanArray(geometry.cellCount), geometry.neighbors, geometry.neighbors)
+            BoardLayout(
+                emptyArray(), BooleanArray(geometry.cellCount), geometry.neighbors, geometry.neighbors,
+                IntArray(geometry.cellCount) { -1 }, Array(geometry.cellCount) { NO_CELLS },
+            )
 
         fun generate(geometry: SphereGeometry, size: BoardSize, random: Random = Random.Default): BoardLayout =
-            generate(geometry, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells, random)
+            generate(
+                geometry, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells, random, size.lineCells,
+            )
+
+        /** Longest row a line cell counts on [geometry]: twice the subdivision frequency. */
+        fun maxLineLength(geometry: SphereGeometry): Int = 2 * geometry.frequency
 
         /**
-         * Places up to [wallCount] walls of [minLength]..[maxLength] edges and [farCount] far cells.
-         * Walls never touch each other or themselves, so they never close a loop and never cut a
-         * region off. A wall that cannot reach [minLength] after several attempts is skipped.
+         * Places up to [wallCount] walls of [minLength]..[maxLength] edges, [farCount] far cells and up
+         * to [lineCount] line cells. Walls never touch each other or themselves, so they never close a
+         * loop and never cut a region off. A wall that cannot reach [minLength] after several attempts
+         * is skipped. Line cells are hexagons that are not far cells and have at least one row of
+         * [MIN_LINE_LENGTH] or more cells; fewer are placed only when not enough such cells exist.
+         * Walls and far cells are drawn first, so [lineCount] does not change them for a given [random].
          */
         fun generate(
             geometry: SphereGeometry,
@@ -51,6 +93,7 @@ class BoardLayout private constructor(
             maxLength: Int,
             farCount: Int,
             random: Random = Random.Default,
+            lineCount: Int = 0,
         ): BoardLayout {
             val cellCount = geometry.cellCount
             val graph = PointGraph(geometry)
@@ -98,10 +141,104 @@ class BoardLayout private constructor(
                 far[order[i]] = true
             }
 
+            val lineSides = IntArray(cellCount) { -1 }
+            val linePaths = Array(cellCount) { NO_CELLS }
+            if (lineCount > 0) placeLines(geometry, links, far, lineCount, random, lineSides, linePaths)
+
             val scopes = Array(cellCount) { cell ->
-                if (far[cell]) twoStepScope(links, cell) else links[cell]
+                when {
+                    far[cell] -> twoStepScope(links, cell)
+                    lineSides[cell] >= 0 -> linePaths[cell].copyOf().also { it.sort() }
+                    else -> links[cell]
+                }
             }
-            return BoardLayout(walls.toTypedArray(), far, links, scopes)
+            return BoardLayout(walls.toTypedArray(), far, links, scopes, lineSides, linePaths)
+        }
+
+        /**
+         * Turns up to [lineCount] random hexagons that are not far cells into line cells. Candidates are
+         * visited in random order; each one gets a random edge among those whose row has at least
+         * [MIN_LINE_LENGTH] cells, and a candidate without such an edge is skipped.
+         */
+        private fun placeLines(
+            geometry: SphereGeometry,
+            links: Array<IntArray>,
+            far: BooleanArray,
+            lineCount: Int,
+            random: Random,
+            lineSides: IntArray,
+            linePaths: Array<IntArray>,
+        ) {
+            val candidates = (0 until geometry.cellCount)
+                .filter { !far[it] && !geometry.isPentagon(it) }
+                .toIntArray()
+            val maxLength = maxLineLength(geometry)
+            val sides = IntArray(HEXAGON_SIDES)
+            val rows = arrayOfNulls<IntArray>(HEXAGON_SIDES)
+            var placed = 0
+            var remaining = candidates.size
+            while (placed < lineCount && remaining > 0) {
+                // Partial Fisher-Yates: draw one of the remaining candidates and drop it from the pool.
+                val pick = random.nextInt(remaining)
+                val cell = candidates[pick]
+                candidates[pick] = candidates[remaining - 1]
+                remaining--
+                var count = 0
+                for (side in 0 until HEXAGON_SIDES) {
+                    val row = straightRow(geometry, links, cell, side, maxLength)
+                    if (row.size >= MIN_LINE_LENGTH) {
+                        sides[count] = side
+                        rows[count] = row
+                        count++
+                    }
+                }
+                if (count == 0) continue
+                val choice = random.nextInt(count)
+                lineSides[cell] = sides[choice]
+                linePaths[cell] = requireNotNull(rows[choice])
+                placed++
+            }
+        }
+
+        /**
+         * Straight row of cells seen from [cell] through its edge [side] (an index 0 until
+         * cornerCount(cell), the edge from corner cornerStart[cell] + side to the next corner).
+         *
+         * The row starts at the neighbour across that edge. In a hexagon entered through edge k it goes
+         * on through the opposite edge k + 3. It ends before a step across a wall (a pair missing from
+         * [links]), before a step back onto [cell] or a cell already in the row, after a pentagon (which
+         * has no opposite edge) and once it holds [maxLength] cells. [cell] itself is never part of it.
+         */
+        fun straightRow(
+            geometry: SphereGeometry,
+            links: Array<IntArray>,
+            cell: Int,
+            side: Int,
+            maxLength: Int,
+        ): IntArray {
+            require(side in 0 until geometry.cornerCount(cell)) { "cell $cell has no edge $side" }
+            val row = ArrayList<Int>()
+            var current = cell
+            var edge = geometry.cornerStart[cell] + side
+            while (row.size < maxLength) {
+                val next = geometry.edgeNeighbor[edge]
+                if (!links[current].contains(next)) break
+                if (next == cell || row.contains(next)) break
+                row.add(next)
+                if (geometry.isPentagon(next)) break
+                val start = geometry.cornerStart[next]
+                var entry = -1
+                for (k in start until geometry.cornerStart[next + 1]) {
+                    if (geometry.edgeNeighbor[k] == current) {
+                        entry = k
+                        break
+                    }
+                }
+                check(entry >= 0) { "cells $current and $next do not share an edge" }
+                edge = start + (entry - start + HEXAGON_SIDES / 2) % HEXAGON_SIDES
+                current = next
+            }
+            return row.toIntArray()
         }
 
         /** Self-avoiding random walk over corner points; null when it cannot reach [minLength] edges. */

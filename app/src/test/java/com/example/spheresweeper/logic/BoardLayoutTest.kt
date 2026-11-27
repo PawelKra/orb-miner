@@ -1,6 +1,7 @@
 package com.example.spheresweeper.logic
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -81,6 +82,8 @@ class BoardLayoutTest {
                     for (b in layout.links[a]) if (b != cell) set.add(b)
                 }
                 set.sorted()
+            } else if (layout.isLine(cell)) {
+                layout.linePath(cell).sorted()
             } else {
                 layout.links[cell].toList()
             }
@@ -133,6 +136,161 @@ class BoardLayoutTest {
         // No mines: one reveal spreads over the links to the whole sphere.
         assertEquals(MoveResult.WON, board.reveal(0))
         for (cell in 0 until geometry.cellCount) assertTrue(board.isRevealed(cell))
+    }
+
+    @Test
+    fun lineCellsMatchBoardSizeAndCountTheirRow() {
+        for (size in BoardSize.values()) {
+            val geometry = geometries.getValue(size)
+            val maxLength = 2 * geometry.frequency
+            for (seed in 0 until 20) {
+                val label = "$size seed $seed"
+                val layout = BoardLayout.generate(geometry, size, Random(seed))
+                assertEquals("$label line count", size.lineCells, layout.lineCount)
+                for (cell in 0 until geometry.cellCount) {
+                    if (!layout.isLine(cell)) {
+                        assertEquals("$label cell $cell side", -1, layout.lineSide(cell))
+                        assertEquals("$label cell $cell path", 0, layout.linePath(cell).size)
+                        if (!layout.isFar(cell)) {
+                            assertEquals("$label cell $cell scope", layout.links[cell].toList(), layout.scopes[cell].toList())
+                        }
+                        continue
+                    }
+                    val row = layout.linePath(cell)
+                    assertFalse("$label line $cell is a pentagon", geometry.isPentagon(cell))
+                    assertFalse("$label line $cell is far", layout.isFar(cell))
+                    assertTrue("$label line $cell length ${row.size}", row.size in BoardLayout.MIN_LINE_LENGTH..maxLength)
+                    assertEquals("$label line $cell scope", row.sorted(), layout.scopes[cell].toList())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun lineRowsGoStraightAndStopAtWallPentagonOrLimit() {
+        val reasons = HashMap<String, Int>()
+        for (size in BoardSize.values()) {
+            val geometry = geometries.getValue(size)
+            val maxLength = 2 * geometry.frequency
+            for (seed in 0 until 10) {
+                // Every eligible cell becomes a line cell, so all kinds of rows show up.
+                val layout = BoardLayout.generate(
+                    geometry, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells, Random(seed),
+                    lineCount = geometry.cellCount,
+                )
+                for (cell in 0 until geometry.cellCount) {
+                    if (!layout.isLine(cell)) continue
+                    val label = "$size seed $seed line $cell"
+                    val row = layout.linePath(cell)
+                    assertEquals(label, row.toList(), BoardLayout.straightRow(geometry, layout.links, cell, layout.lineSide(cell), maxLength).toList())
+                    val reason = checkStraightRow(label, geometry, layout.links, cell, layout.lineSide(cell), row, maxLength)
+                    reasons[reason] = (reasons[reason] ?: 0) + 1
+                }
+            }
+        }
+        assertTrue("rows ended by a wall: $reasons", (reasons["wall"] ?: 0) > 0)
+        assertTrue("rows ended on a pentagon: $reasons", (reasons["pentagon"] ?: 0) > 0)
+        assertTrue("rows ended by the limit: $reasons", (reasons["limit"] ?: 0) > 0)
+    }
+
+    @Test
+    fun straightRowStopsBeforeRepeatingACell() {
+        // Without a length limit rows only end on pentagons or by coming back around the sphere.
+        val geometry = geometries.getValue(BoardSize.LARGE)
+        val reasons = HashMap<String, Int>()
+        for (cell in 0 until geometry.cellCount) {
+            if (geometry.isPentagon(cell)) continue
+            for (side in 0 until 6) {
+                val label = "cell $cell side $side"
+                val row = BoardLayout.straightRow(geometry, geometry.neighbors, cell, side, geometry.cellCount)
+                val reason = checkStraightRow(label, geometry, geometry.neighbors, cell, side, row, geometry.cellCount)
+                assertTrue("$label ended by $reason", reason == "pentagon" || reason == "repeat")
+                reasons[reason] = (reasons[reason] ?: 0) + 1
+            }
+        }
+        assertTrue("rows ended by a repeat: $reasons", (reasons["repeat"] ?: 0) > 0)
+    }
+
+    @Test
+    fun lineCellNumberCountsOnlyItsRowAndZeroOpensTheRow() {
+        val size = BoardSize.GIANT
+        val geometry = geometries.getValue(size)
+        val layout = BoardLayout.generate(geometry, size, Random(5))
+        val cell = (0 until geometry.cellCount).first { layout.isLine(it) }
+        val row = layout.linePath(cell)
+        val offRow = geometry.neighbors[cell].filter { it !in row }
+        assertTrue(offRow.isNotEmpty())
+
+        // Mines on every neighbour outside the row and on the third cell of the row: the number is 1.
+        val board = MinesweeperBoard(layout.scopes, 0)
+        board.placeMinesAt((offRow + row[2]).toIntArray())
+        assertEquals(MoveResult.REVEALED, board.reveal(cell))
+        assertEquals(1, board.adjacentMines(cell))
+        assertFalse(board.isRevealed(row[0]))
+
+        // Without the mine in the row the cell shows 0 and the reveal opens the whole row.
+        val open = MinesweeperBoard(layout.scopes, 0)
+        open.placeMinesAt(offRow.toIntArray())
+        open.reveal(cell)
+        assertEquals(0, open.adjacentMines(cell))
+        for (c in row) assertTrue("row cell $c revealed", open.isRevealed(c))
+    }
+
+    @Test
+    fun linesDoNotChangeWallsOrFarCellsOfTheSameSeed() {
+        val size = BoardSize.HUGE
+        val geometry = geometries.getValue(size)
+        val plain = BoardLayout.generate(geometry, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells, Random(9))
+        val lined = BoardLayout.generate(geometry, size, Random(9))
+        val again = BoardLayout.generate(geometry, size, Random(9))
+        assertEquals(0, plain.lineCount)
+        assertEquals(plain.walls.map { it.toList() }, lined.walls.map { it.toList() })
+        for (cell in 0 until geometry.cellCount) {
+            assertEquals(plain.isFar(cell), lined.isFar(cell))
+            assertEquals(lined.lineSide(cell), again.lineSide(cell))
+            assertEquals(lined.linePath(cell).toList(), again.linePath(cell).toList())
+        }
+    }
+
+    /**
+     * Checks that [row] leaves [cell] through edge [side], passes every hexagon through opposite edges
+     * over [links] without repeating a cell, and returns why it ended: "limit", "pentagon", "wall" or
+     * "repeat".
+     */
+    private fun checkStraightRow(
+        label: String, geometry: SphereGeometry, links: Array<IntArray>, cell: Int, side: Int, row: IntArray, maxLength: Int,
+    ): String {
+        assertEquals("$label first cell", geometry.edgeNeighbor[geometry.cornerStart[cell] + side], row[0])
+        assertTrue("$label leaves $cell across a wall", links[cell].contains(row[0]))
+        assertEquals("$label repeats a cell", row.size, row.toSet().size)
+        assertFalse("$label contains its own cell", row.contains(cell))
+        assertTrue("$label too long", row.size <= maxLength)
+        for (i in 1 until row.size) {
+            val prev = if (i >= 2) row[i - 2] else cell
+            val here = row[i - 1]
+            assertFalse("$label goes on after pentagon $here", geometry.isPentagon(here))
+            assertTrue("$label crosses a wall at $here", links[here].contains(row[i]))
+            val entry = localEdge(geometry, here, prev)
+            val exit = localEdge(geometry, here, row[i])
+            assertEquals("$label bends at $here", 3, (exit - entry + 6) % 6)
+        }
+        val last = row[row.size - 1]
+        if (row.size == maxLength) return "limit"
+        if (geometry.isPentagon(last)) return "pentagon"
+        val before = if (row.size >= 2) row[row.size - 2] else cell
+        val next = geometry.edgeNeighbor[geometry.cornerStart[last] + (localEdge(geometry, last, before) + 3) % 6]
+        if (!links[last].contains(next)) return "wall"
+        assertTrue("$label stopped without a reason", next == cell || row.contains(next))
+        return "repeat"
+    }
+
+    /** Index 0 until cornerCount(cell) of the edge [cell] shares with [other]. */
+    private fun localEdge(geometry: SphereGeometry, cell: Int, other: Int): Int {
+        val start = geometry.cornerStart[cell]
+        for (k in start until geometry.cornerStart[cell + 1]) {
+            if (geometry.edgeNeighbor[k] == other) return k - start
+        }
+        throw AssertionError("cells $cell and $other are not neighbours")
     }
 
     /** The two cells separated by the edge between two corner indices, or null if it is not a cell edge. */

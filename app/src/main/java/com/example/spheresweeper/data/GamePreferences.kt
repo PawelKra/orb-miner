@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.example.spheresweeper.logic.BoardSize
 
-/** Settings and best times stored locally in SharedPreferences. */
+/** Settings, best times and campaign progress stored locally in SharedPreferences. */
 class GamePreferences(context: Context) {
 
     private val prefs: SharedPreferences =
@@ -18,6 +18,11 @@ class GamePreferences(context: Context) {
     var hapticsEnabled: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, true)
         set(value) = prefs.edit { putBoolean(KEY_HAPTICS, value) }
+
+    /** Campaign progress in the text form of [com.example.spheresweeper.logic.CampaignProgress.serialize]. */
+    var campaignProgress: String?
+        get() = prefs.getString(KEY_CAMPAIGN_PROGRESS, null)
+        set(value) = prefs.edit { putString(KEY_CAMPAIGN_PROGRESS, value) }
 
     /** Best time in milliseconds for [size], or null when the board was never won. */
     fun bestTimeMillis(size: BoardSize): Long? {
@@ -46,6 +51,7 @@ class GamePreferences(context: Context) {
         const val KEY_FLAG_BY_LONG_PRESS = "flag_by_long_press"
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_BEST_PREFIX = "best_time_"
+        const val KEY_CAMPAIGN_PROGRESS = "campaign_progress"
         const val NO_TIME = -1L
     }
 }
