@@ -10,6 +10,7 @@
     <string name="board_huge">Huge</string>
     <string name="board_giant">Giant</string>
     <string name="board_details">%1$s · %2$s</string>
+    <string name="board_details_lives">%1$s · %2$s · %3$s</string>
 
     <plurals name="cells_count">
         <item quantity="one">%d cell</item>
@@ -18,6 +19,11 @@
     <plurals name="mines_count">
         <item quantity="one">%d mine</item>
         <item quantity="other">%d mines</item>
+    </plurals>
+
+    <plurals name="lives_count">
+        <item quantity="one">%d life</item>
+        <item quantity="other">%d lives</item>
     </plurals>
 
     <string name="best_label">Best</string>
@@ -34,6 +40,8 @@
     <string name="hint_long_press">Tap to reveal · hold to flag · drag to rotate</string>
 
     <string name="hud_mines_remaining">Mines remaining: %1$d</string>
+    <string name="hud_lives_remaining">Lives remaining: %1$d</string>
+    <string name="action_hint">Hint, %1$d left</string>
     <string name="hud_time">Time: %1$s</string>
     <string name="action_restart">Restart</string>
     <string name="action_menu">Back to menu</string>

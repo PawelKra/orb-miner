@@ -29,23 +29,28 @@ Dotknięcie działa tylko na polach z przodu kuli. Ruch palca dłuższy niż pr�
 2. Miny trafiają na planszę dopiero przy pierwszym odkryciu. Pierwsze pole i wszyscy jego sąsiedzi są zawsze bezpieczni.
 3. Odkrycie pola z zerem odkrywa cały spójny obszar zer i jego obramowanie z liczbami.
 4. Wygrywasz, gdy odkryjesz wszystkie pola bez min.
-5. Przegrywasz, gdy odkryjesz minę. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
+5. Ściany to świecące linie na krawędziach pól. Liczba nie liczy min po drugiej stronie ściany, a odkrywanie zer nie przechodzi przez ścianę.
+6. Pola dalekiego zasięgu mają złoty pierścień. Ich liczba liczy miny w dwóch pierścieniach sąsiadów (do 18 pól), też bez przechodzenia przez ściany.
+7. Przycisk z żarówką odkrywa bezpieczne pole przy już odkrytym obszarze i obraca kulę w jego stronę.
+8. Na większych planszach masz kilka żyć. Trafiona mina zabiera jedno życie, zostaje na kuli jako czerwone pole i liczy się jak flaga.
+9. Przegrywasz, gdy stracisz ostatnie życie. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
 
-Licznik u góry pokazuje liczbę min minus liczbę flag. Zegar startuje przy pierwszym odkryciu.
+Licznik u góry pokazuje liczbę min minus liczbę flag i trafionych min. Zegar startuje przy pierwszym odkryciu.
+Cyfry obracają się razem z widokiem: ich podstawa leży zawsze na boku pola, który na ekranie jest najbardziej poziomy.
 Gra zapisuje najlepszy czas dla każdego rozmiaru planszy.
 
 ## Rozmiary planszy
 
-| Rozmiar | n | Pola | Miny |
-|---------|---|------|------|
-| Tiny | 2 | 42 | 6 |
-| Small | 3 | 92 | 14 |
-| Medium | 4 | 162 | 28 |
-| Large | 5 | 252 | 45 |
-| Huge | 6 | 362 | 65 |
-| Giant | 8 | 642 | 125 |
+| Rozmiar | n | Pola | Miny | Życia | Podpowiedzi | Ściany (max długość) | Pola dalekiego zasięgu |
+|---------|---|------|------|-------|-------------|----------------------|------------------------|
+| Tiny | 2 | 42 | 6 | 1 | 0 | 0 | 0 |
+| Small | 3 | 92 | 14 | 1 | 1 | 2 (4) | 3 |
+| Medium | 4 | 162 | 28 | 2 | 1 | 3 (6) | 5 |
+| Large | 5 | 252 | 45 | 3 | 2 | 4 (8) | 8 |
+| Huge | 6 | 362 | 65 | 4 | 2 | 5 (10) | 11 |
+| Giant | 8 | 642 | 125 | 5 | 3 | 7 (14) | 18 |
 
-Liczby min zmienisz w jednym miejscu: `app/src/main/java/com/example/spheresweeper/logic/GameConstants.kt`.
+Wszystkie te liczby zmienisz w jednym miejscu: `app/src/main/java/com/example/spheresweeper/logic/GameConstants.kt`.
 
 ## Wersje narzędzi
 

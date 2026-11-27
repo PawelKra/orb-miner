@@ -20,8 +20,17 @@ class SphereGeometry private constructor(
     val corners: FloatArray,
     /** neighbors[i] = indices of cells adjacent to i (5 or 6 entries), sorted ascending. */
     val neighbors: Array<IntArray>,
+    /** Per corner index k of cell i: the cell on the other side of the edge from corner k to the next
+     *  corner of cell i (wrapping around). Same size as the corner index range. */
+    val edgeNeighbor: IntArray,
+    /** Per corner index: global id of that point. The three cells meeting at a point list the same id.
+     *  Ids run from 0 until [pointCount]. */
+    val cornerPoint: IntArray,
 ) {
     val cellCount: Int = centers.size / 3
+
+    /** Number of distinct corner points (vertices of the cell polygons). */
+    val pointCount: Int = (cornerPoint.maxOrNull() ?: -1) + 1
 
     fun cornerCount(cell: Int): Int = cornerStart[cell + 1] - cornerStart[cell]
 
@@ -254,10 +263,13 @@ class SphereGeometry private constructor(
                 cornerStart[v + 1] = cornerStart[v] + incidentCount[v]
             }
             val corners = FloatArray(cornerStart[vertexCount] * 3)
+            val edgeNeighbor = IntArray(cornerStart[vertexCount])
+            val cornerPoint = IntArray(cornerStart[vertexCount])
             val neighbors = arrayOfNulls<IntArray>(vertexCount)
 
             // Walk the triangle fan around each vertex. In a CCW triangle (v, a, b) the next triangle
             // counter-clockwise around v shares the edge (v, b), i.e. it is the one whose first == b.
+            // The cell edge between the centroids of these two triangles therefore separates v from b.
             for (v in 0 until vertexCount) {
                 val count = incidentCount[v]
                 val base = v * MAX_VALENCE
@@ -270,6 +282,8 @@ class SphereGeometry private constructor(
                     corners[3 * out] = centroids[3 * tri].toFloat()
                     corners[3 * out + 1] = centroids[3 * tri + 1].toFloat()
                     corners[3 * out + 2] = centroids[3 * tri + 2].toFloat()
+                    edgeNeighbor[out] = incidentSecond[base + k]
+                    cornerPoint[out] = tri
                     out++
                     val next = incidentSecond[base + k]
                     var found = -1
@@ -298,6 +312,8 @@ class SphereGeometry private constructor(
                 cornerStart = cornerStart,
                 corners = corners,
                 neighbors = Array(vertexCount) { requireNotNull(neighbors[it]) },
+                edgeNeighbor = edgeNeighbor,
+                cornerPoint = cornerPoint,
             )
         }
 

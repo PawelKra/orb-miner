@@ -4,23 +4,44 @@ import kotlin.random.Random
 
 enum class GameStatus { READY, PLAYING, WON, LOST }
 
-enum class MoveResult { NOTHING, REVEALED, WON, LOST }
+/** MINE_HIT: a mine went off but a spare life absorbed it and the game goes on. */
+enum class MoveResult { NOTHING, REVEALED, MINE_HIT, WON, LOST }
 
 /**
- * Minesweeper rules on an arbitrary cell graph given by [neighbors].
+ * Minesweeper rules on an arbitrary cell graph given by [neighbors]: neighbors[i] lists the cells
+ * whose mines the number on i counts. Reveals of zero cells spread over the same lists. With walls
+ * and far cells this is [BoardLayout.scopes] rather than plain adjacency, and need not be symmetric.
  *
  * Mines are placed lazily on the first reveal so that the first revealed cell and all of its
  * neighbours are always safe. The board is mutable; callers observe changes through the return
  * values of [reveal], [toggleFlag] and [chord].
  *
+ * The player has [lives] lives. Hitting a mine costs one; while lives remain, the mine is marked as
+ * detonated ([isDetonated]) and counts as a known mine, like a flag. Losing the last life ends the game.
  * The mine that ends the game is not marked as revealed; it is reported through [explodedCell].
  */
 class MinesweeperBoard(
     val neighbors: Array<IntArray>,
     mineCount: Int,
     private val random: Random = Random.Default,
+    lives: Int = 1,
 ) {
     val cellCount: Int = neighbors.size
+
+    /** Lives at the start of the game, at least 1. */
+    val lives: Int = maxOf(1, lives)
+
+    /** Lives not yet lost; 0 once the game is LOST. */
+    var livesLeft: Int = this.lives
+        private set
+
+    /** Mines that went off without ending the game. */
+    var detonatedCount: Int = 0
+        private set
+
+    /** -1 if none; otherwise the most recent mine that cost a life without ending the game. */
+    var lastDetonatedCell: Int = -1
+        private set
 
     /** Requested count clamped so that the first-click safe zone always fits. */
     var mineCount: Int = mineCount.coerceIn(0, maxOf(0, cellCount - 1 - maxDegree(neighbors)))
@@ -40,8 +61,8 @@ class MinesweeperBoard(
     var flagCount: Int = 0
         private set
 
-    /** mineCount - flagCount (may be negative). */
-    val minesRemaining: Int get() = mineCount - flagCount
+    /** mineCount - flagCount - detonatedCount (may be negative). */
+    val minesRemaining: Int get() = mineCount - flagCount - detonatedCount
 
     var revealedCount: Int = 0
         private set
@@ -49,6 +70,7 @@ class MinesweeperBoard(
     private val mine = BooleanArray(cellCount)
     private val revealed = BooleanArray(cellCount)
     private val flagged = BooleanArray(cellCount)
+    private val detonated = BooleanArray(cellCount)
     private val adjacent = IntArray(cellCount)
 
     /** Work stack for the iterative flood fill. Every cell is pushed at most once per fill. */
@@ -63,6 +85,9 @@ class MinesweeperBoard(
 
     fun isFlagged(cell: Int): Boolean = flagged[cell]
 
+    /** True for a mine that went off and cost a life while the game continued. */
+    fun isDetonated(cell: Int): Boolean = detonated[cell]
+
     /** Number of mined neighbours. Valid once mines are placed; 0 before. */
     fun adjacentMines(cell: Int): Int = adjacent[cell]
 
@@ -74,17 +99,30 @@ class MinesweeperBoard(
         return count
     }
 
+    /** Neighbours known to be mines: flagged or already detonated. Chording compares this with the number. */
+    fun knownMineNeighbors(cell: Int): Int {
+        var count = 0
+        for (nb in neighbors[cell]) {
+            if (flagged[nb] || detonated[nb]) count++
+        }
+        return count
+    }
+
     /** True when the game is LOST and this cell carries a flag but no mine. */
     fun isWrongFlag(cell: Int): Boolean = status == GameStatus.LOST && flagged[cell] && !mine[cell]
 
     /** Reveal a covered, unflagged cell. First call places mines (cell + neighbours safe) and sets PLAYING.
      *  Zero cells flood-fill iteratively (ArrayDeque/IntArray stack). Ignored (NOTHING) when game over,
-     *  cell revealed, or flagged. Returns LOST if a mine was hit (all mines then count as shown by the UI),
-     *  WON if that completes the board, else REVEALED. */
+     *  cell revealed, flagged or detonated. A mine costs a life: MINE_HIT while lives remain, LOST with
+     *  the last one (all mines then count as shown by the UI). WON if that completes the board, else REVEALED. */
     fun reveal(cell: Int): MoveResult {
-        if (isGameOver || revealed[cell] || flagged[cell]) return MoveResult.NOTHING
+        if (isGameOver || revealed[cell] || flagged[cell] || detonated[cell]) return MoveResult.NOTHING
         if (!minesPlaced) placeMinesAvoiding(cell)
         if (mine[cell]) {
+            if (livesLeft > 1) {
+                detonate(cell)
+                return MoveResult.MINE_HIT
+            }
             explode(cell)
             return MoveResult.LOST
         }
@@ -94,7 +132,7 @@ class MinesweeperBoard(
 
     /** Toggle flag on a covered cell. Allowed in READY and PLAYING. Returns true if the flag state changed. */
     fun toggleFlag(cell: Int): Boolean {
-        if (isGameOver || revealed[cell]) return false
+        if (isGameOver || revealed[cell] || detonated[cell]) return false
         if (flagged[cell]) {
             flagged[cell] = false
             flagCount--
@@ -105,34 +143,41 @@ class MinesweeperBoard(
         return true
     }
 
-    /** Chording on a revealed numbered cell: if flaggedNeighbors == adjacentMines (> 0), reveal every covered,
-     *  unflagged neighbour (with flood fill). Returns NOTHING if not applicable or nothing changed,
-     *  LOST if any revealed neighbour was a mine (explodedCell = that mine), WON if board complete, else REVEALED. */
+    /** Chording on a revealed numbered cell: if knownMineNeighbors == adjacentMines (> 0), reveal every covered,
+     *  unflagged, undetonated neighbour (with flood fill). Each mine among them costs a life. Returns NOTHING
+     *  if not applicable or nothing changed, LOST when the hits use up the last life (explodedCell = first
+     *  such mine), WON if the board is complete, MINE_HIT if a mine cost a life, else REVEALED. */
     fun chord(cell: Int): MoveResult {
         if (!canChord(cell)) return MoveResult.NOTHING
-        var hitMine = -1
+        var firstHit = -1
+        var hits = 0
         for (nb in neighbors[cell]) {
-            if (revealed[nb] || flagged[nb]) continue
+            if (revealed[nb] || flagged[nb] || detonated[nb]) continue
             if (mine[nb]) {
-                if (hitMine < 0) hitMine = nb
+                if (firstHit < 0) firstHit = nb
+                hits++
             } else {
                 floodReveal(nb)
             }
         }
-        if (hitMine >= 0) {
-            explode(hitMine)
+        if (hits >= livesLeft) {
+            explode(firstHit)
             return MoveResult.LOST
         }
-        return if (checkWin()) MoveResult.WON else MoveResult.REVEALED
+        for (nb in neighbors[cell]) {
+            if (mine[nb] && !flagged[nb] && !detonated[nb]) detonate(nb)
+        }
+        if (checkWin()) return MoveResult.WON
+        return if (hits > 0) MoveResult.MINE_HIT else MoveResult.REVEALED
     }
 
     /** True if chord(cell) would reveal at least one cell (for haptics/UI). */
     fun canChord(cell: Int): Boolean {
         if (status != GameStatus.PLAYING || !revealed[cell] || mine[cell]) return false
         val number = adjacent[cell]
-        if (number <= 0 || flaggedNeighbors(cell) != number) return false
+        if (number <= 0 || knownMineNeighbors(cell) != number) return false
         for (nb in neighbors[cell]) {
-            if (!revealed[nb] && !flagged[nb]) return true
+            if (!revealed[nb] && !flagged[nb] && !detonated[nb]) return true
         }
         return false
     }
@@ -214,8 +259,17 @@ class MinesweeperBoard(
         }
     }
 
+    /** A mine went off but a spare life absorbs it. */
+    private fun detonate(cell: Int) {
+        detonated[cell] = true
+        detonatedCount++
+        livesLeft--
+        lastDetonatedCell = cell
+    }
+
     private fun explode(cell: Int) {
         explodedCell = cell
+        livesLeft = 0
         status = GameStatus.LOST
     }
 

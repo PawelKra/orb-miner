@@ -162,4 +162,37 @@ class SphereGeometryTest {
         val length = sqrt(x * x + y * y + z * z)
         assertTrue("$message has length $length", abs(length - 1.0) < 1e-5)
     }
+
+    @Test
+    fun edgeNeighboursMatchNeighbourListsAndSharedEdges() {
+        for ((size, geometry) in geometries) {
+            for (cell in 0 until geometry.cellCount) {
+                val start = geometry.cornerStart[cell]
+                val end = geometry.cornerStart[cell + 1]
+                val across = (start until end).map { geometry.edgeNeighbor[it] }.sorted()
+                assertEquals("$size cell $cell", geometry.neighbors[cell].toList(), across)
+                for (k in start until end) {
+                    val next = if (k + 1 < end) k + 1 else start
+                    val other = geometry.edgeNeighbor[k]
+                    // The neighbour lists the same edge with its end points swapped.
+                    val os = geometry.cornerStart[other]
+                    val oe = geometry.cornerStart[other + 1]
+                    val match = (os until oe).single { geometry.edgeNeighbor[it] == cell }
+                    val matchNext = if (match + 1 < oe) match + 1 else os
+                    assertEquals("$size $cell/$other", geometry.cornerPoint[k], geometry.cornerPoint[matchNext])
+                    assertEquals("$size $cell/$other", geometry.cornerPoint[next], geometry.cornerPoint[match])
+                }
+            }
+        }
+    }
+
+    @Test
+    fun everyCornerPointIsSharedByThreeCells() {
+        for ((size, geometry) in geometries) {
+            val uses = IntArray(geometry.pointCount)
+            for (point in geometry.cornerPoint) uses[point]++
+            for (p in uses.indices) assertEquals("$size point $p", 3, uses[p])
+            assertEquals("$size points", 20 * size.frequency * size.frequency, geometry.pointCount)
+        }
+    }
 }

@@ -23,6 +23,7 @@ object SpaceColors {
     val Gold = Color(0xFFFFD166)
     val Success = Color(0xFF5CF2A8)
     val Danger = Color(0xFFFF4D6A)
+    val Heart = Color(0xFFFF6FA8)
 
     val TextPrimary = Color(0xFFE9EDFF)
     val TextSecondary = Color(0xFF9AA3CF)
