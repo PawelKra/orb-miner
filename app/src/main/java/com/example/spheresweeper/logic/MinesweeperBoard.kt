@@ -19,14 +19,57 @@ enum class MoveResult { NOTHING, REVEALED, MINE_HIT, WON, LOST }
  * The player has [lives] lives. Hitting a mine costs one; while lives remain, the mine is marked as
  * detonated ([isDetonated]) and counts as a known mine, like a flag. Losing the last life ends the game.
  * The mine that ends the game is not marked as revealed; it is reported through [explodedCell].
+ *
+ * Cells outside [present] (the ocean of [BoardLayout]) take no part: they hold no mine, cannot be
+ * revealed or flagged, appear in no list and do not count towards the win, which comes once every
+ * present safe cell is revealed. By default every cell is present.
+ *
+ * A cell with a lock ([lockThreshold] above 0) hides its number while fewer than that many cells are
+ * revealed on the whole board ([isLockOpen]). It can be revealed like any cell, but while it is locked a
+ * zero on it does not spread and it cannot be chorded, since either would give the number away. When
+ * [revealedCount] reaches the threshold the lock opens; if the cell is revealed and shows 0, its zero
+ * spreads at once as on a normal reveal, and locks that this spread opens in turn act the same way.
+ * Lock cells never receive mines when the board places them itself.
  */
 class MinesweeperBoard(
     val neighbors: Array<IntArray>,
     mineCount: Int,
     private val random: Random = Random.Default,
     lives: Int = 1,
+    present: BooleanArray? = null,
+    lockThresholds: IntArray? = null,
 ) {
     val cellCount: Int = neighbors.size
+
+    private val present: BooleanArray = present?.copyOf() ?: BooleanArray(cellCount) { true }
+
+    /** Cells that take part in the game. */
+    val presentCount: Int = this.present.count { it }
+
+    /** Per cell: revealed cells needed before its number shows, 0 for cells without a lock. */
+    private val lockThreshold: IntArray = lockThresholds?.copyOf() ?: IntArray(cellCount)
+
+    /** Lock cells by rising threshold; locks before [nextLock] have been opened. */
+    private val lockOrder: IntArray
+
+    private var nextLock = 0
+
+    init {
+        require(this.present.size == cellCount) { "present has ${this.present.size} cells, expected $cellCount" }
+        require(lockThreshold.size == cellCount) { "lockThresholds has ${lockThreshold.size} cells, expected $cellCount" }
+        for (cell in 0 until cellCount) {
+            require(lockThreshold[cell] >= 0) { "cell $cell has negative lock threshold" }
+            require(this.present[cell] || lockThreshold[cell] == 0) { "cell $cell is not present but has a lock" }
+            if (!this.present[cell]) require(neighbors[cell].isEmpty()) { "cell $cell is not present but has neighbours" }
+            for (nb in neighbors[cell]) require(this.present[nb]) { "cell $cell lists cell $nb, which is not present" }
+        }
+        lockOrder = (0 until cellCount).filter { lockThreshold[it] > 0 }
+            .sortedWith(compareBy({ lockThreshold[it] }, { it }))
+            .toIntArray()
+    }
+
+    /** Number of cells with a lock. */
+    val lockCount: Int get() = lockOrder.size
 
     /** Lives at the start of the game, at least 1. */
     val lives: Int = maxOf(1, lives)
@@ -44,7 +87,7 @@ class MinesweeperBoard(
         private set
 
     /** Requested count clamped so that the first-click safe zone always fits. */
-    var mineCount: Int = mineCount.coerceIn(0, maxOf(0, cellCount - 1 - maxDegree(neighbors)))
+    var mineCount: Int = mineCount.coerceIn(0, maxOf(0, presentCount - lockOrder.size - 1 - maxDegree(neighbors)))
         private set
 
     /** READY until the first reveal places the mines. */
@@ -73,13 +116,26 @@ class MinesweeperBoard(
     private val detonated = BooleanArray(cellCount)
     private val adjacent = IntArray(cellCount)
 
-    /** Work stack for the iterative flood fill. Every cell is pushed at most once per fill. */
-    private val stack = IntArray(cellCount)
+    /**
+     * Work stack for the iterative flood fill. Every cell is pushed at most once when revealed and a
+     * lock cell once more when its lock opens.
+     */
+    private val stack = IntArray(cellCount + lockOrder.size)
+    private var stackTop = 0
 
     private val isGameOver: Boolean
         get() = status == GameStatus.WON || status == GameStatus.LOST
 
     fun isMine(cell: Int): Boolean = mine[cell]
+
+    /** False for cells that take no part in the game (ocean). */
+    fun isPresent(cell: Int): Boolean = present[cell]
+
+    /** Revealed cells needed before the number of [cell] shows; 0 when it has no lock. */
+    fun lockThreshold(cell: Int): Int = lockThreshold[cell]
+
+    /** True when the number of [cell] may be shown: it has no lock or enough cells are revealed. */
+    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= revealedCount
 
     fun isRevealed(cell: Int): Boolean = revealed[cell]
 
@@ -88,7 +144,7 @@ class MinesweeperBoard(
     /** True for a mine that went off and cost a life while the game continued. */
     fun isDetonated(cell: Int): Boolean = detonated[cell]
 
-    /** Number of mined neighbours. Valid once mines are placed; 0 before. */
+    /** Number of mined neighbours. Valid once mines are placed; 0 before. Shown only if [isLockOpen]. */
     fun adjacentMines(cell: Int): Int = adjacent[cell]
 
     fun flaggedNeighbors(cell: Int): Int {
@@ -116,7 +172,7 @@ class MinesweeperBoard(
      *  cell revealed, flagged or detonated. A mine costs a life: MINE_HIT while lives remain, LOST with
      *  the last one (all mines then count as shown by the UI). WON if that completes the board, else REVEALED. */
     fun reveal(cell: Int): MoveResult {
-        if (isGameOver || revealed[cell] || flagged[cell] || detonated[cell]) return MoveResult.NOTHING
+        if (isGameOver || !present[cell] || revealed[cell] || flagged[cell] || detonated[cell]) return MoveResult.NOTHING
         if (!minesPlaced) placeMinesAvoiding(cell)
         if (mine[cell]) {
             if (livesLeft > 1) {
@@ -132,7 +188,7 @@ class MinesweeperBoard(
 
     /** Toggle flag on a covered cell. Allowed in READY and PLAYING. Returns true if the flag state changed. */
     fun toggleFlag(cell: Int): Boolean {
-        if (isGameOver || revealed[cell] || detonated[cell]) return false
+        if (isGameOver || !present[cell] || revealed[cell] || detonated[cell]) return false
         if (flagged[cell]) {
             flagged[cell] = false
             flagCount--
@@ -171,9 +227,9 @@ class MinesweeperBoard(
         return if (hits > 0) MoveResult.MINE_HIT else MoveResult.REVEALED
     }
 
-    /** True if chord(cell) would reveal at least one cell (for haptics/UI). */
+    /** True if chord(cell) would reveal at least one cell (for haptics/UI). Never on a locked number. */
     fun canChord(cell: Int): Boolean {
-        if (status != GameStatus.PLAYING || !revealed[cell] || mine[cell]) return false
+        if (status != GameStatus.PLAYING || !revealed[cell] || mine[cell] || !isLockOpen(cell)) return false
         val number = adjacent[cell]
         if (number <= 0 || knownMineNeighbors(cell) != number) return false
         for (nb in neighbors[cell]) {
@@ -189,13 +245,14 @@ class MinesweeperBoard(
      * is known to be safe. Must be called before mines are placed.
      *
      * @throws IllegalStateException when mines are already placed.
-     * @throws IllegalArgumentException when a cell is out of range or [start] is among [mines].
+     * @throws IllegalArgumentException when a cell is out of range or not present, or [start] is
+     *   among [mines].
      */
     fun startWith(mines: IntArray, start: Int): MoveResult {
         check(!minesPlaced) { "mines are already placed" }
-        require(start in 0 until cellCount) { "start $start out of range" }
+        require(start in 0 until cellCount && present[start]) { "start $start out of range or not present" }
         for (cell in mines) {
-            require(cell in 0 until cellCount) { "mine $cell out of range" }
+            require(cell in 0 until cellCount && present[cell]) { "mine $cell out of range or not present" }
             require(cell != start) { "start $start is a mine" }
         }
         if (flagged[start]) {
@@ -220,7 +277,10 @@ class MinesweeperBoard(
         finishPlacement()
     }
 
-    /** Places [mineCount] mines uniformly among cells outside {first} ∪ neighbours(first). */
+    /**
+     * Places [mineCount] mines uniformly among present cells without a lock outside
+     * {first} ∪ neighbours(first).
+     */
     private fun placeMinesAvoiding(first: Int) {
         val excluded = BooleanArray(cellCount)
         excluded[first] = true
@@ -229,7 +289,7 @@ class MinesweeperBoard(
         val candidates = IntArray(cellCount)
         var candidateCount = 0
         for (cell in 0 until cellCount) {
-            if (!excluded[cell]) {
+            if (!excluded[cell] && present[cell] && lockThreshold[cell] == 0) {
                 candidates[candidateCount] = cell
                 candidateCount++
             }
@@ -263,23 +323,30 @@ class MinesweeperBoard(
     /**
      * Reveals [start] (which must be covered, unflagged and mine-free) and, if it has no mined
      * neighbours, iteratively spreads through connected zero cells, revealing their numbered border.
-     * Flagged cells are never revealed.
+     * Flagged cells are never revealed. A zero on a locked cell does not spread until its lock opens;
+     * locks opened by this reveal spread their zeros within the same call.
      */
     private fun floodReveal(start: Int) {
-        var top = 0
-        revealed[start] = true
-        revealedCount++
-        stack[top++] = start
-        while (top > 0) {
-            val cell = stack[--top]
-            if (adjacent[cell] != 0) continue
+        stackTop = 0
+        revealCell(start)
+        while (stackTop > 0) {
+            val cell = stack[--stackTop]
+            if (adjacent[cell] != 0 || !isLockOpen(cell)) continue
             for (nb in neighbors[cell]) {
-                if (!revealed[nb] && !flagged[nb] && !mine[nb]) {
-                    revealed[nb] = true
-                    revealedCount++
-                    stack[top++] = nb
-                }
+                if (!revealed[nb] && !flagged[nb] && !mine[nb]) revealCell(nb)
             }
+        }
+    }
+
+    /** Marks [cell] revealed, queues it for spreading and opens the locks the new count reaches. */
+    private fun revealCell(cell: Int) {
+        revealed[cell] = true
+        revealedCount++
+        stack[stackTop++] = cell
+        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
+            val opened = lockOrder[nextLock++]
+            // A revealed zero held back by its lock spreads now.
+            if (revealed[opened] && adjacent[opened] == 0) stack[stackTop++] = opened
         }
     }
 
@@ -298,7 +365,7 @@ class MinesweeperBoard(
     }
 
     private fun checkWin(): Boolean {
-        if (revealedCount == cellCount - mineCount) {
+        if (revealedCount == presentCount - mineCount) {
             status = GameStatus.WON
             return true
         }

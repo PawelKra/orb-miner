@@ -244,7 +244,12 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
     val shape = RoundedCornerShape(18.dp)
     val resources = LocalContext.current.resources
     val cells = resources.getQuantityString(R.plurals.cells_count, boardSize.cellCount, boardSize.cellCount)
-    val mines = resources.getQuantityString(R.plurals.mines_count, boardSize.mines, boardSize.mines)
+    // With ocean the mine count follows the drawn land, so the card shows the count for the expected land.
+    val mineCount = boardSize.expectedMines
+    val mines = resources.getQuantityString(
+        if (boardSize.islands > 0) R.plurals.mines_count_approx else R.plurals.mines_count,
+        mineCount, mineCount,
+    )
     val details = if (boardSize.lives > 1) {
         val lives = resources.getQuantityString(R.plurals.lives_count, boardSize.lives, boardSize.lives)
         stringResource(R.string.board_details_lives, cells, mines, lives)

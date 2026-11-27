@@ -89,6 +89,62 @@ class CampaignProgressTest {
     }
 
     @Test
+    fun portalsAndLocksOpenAfterTheWholeTrunkAndIslandsDoNot() {
+        val newBranches = listOf(Branch.PORTALS, Branch.LOCKS)
+        val almost = winAll(CampaignProgress.EMPTY, trunk.dropLast(1))
+        for (branch in newBranches + Branch.ISLANDS) {
+            assertFalse("$branch", almost.isBranchOpen(branch))
+            assertFalse("$branch", almost.isUnlocked(Campaign.levels(branch).first()))
+        }
+        val done = win(almost, trunk.last())
+        for (branch in newBranches) {
+            val levels = Campaign.levels(branch)
+            assertTrue("$branch", done.isBranchOpen(branch))
+            assertTrue("$branch", done.isUnlocked(levels[0]))
+            assertFalse("$branch", done.isUnlocked(levels[1]))
+            val next = win(done, levels[0])
+            assertTrue("$branch", next.isUnlocked(levels[1]))
+            assertFalse("$branch", next.isUnlocked(levels[2]))
+        }
+        assertFalse(done.isBranchOpen(Branch.ISLANDS))
+        assertFalse(done.isUnlocked(Campaign.levels(Branch.ISLANDS).first()))
+    }
+
+    @Test
+    fun islandsOpenAfterHalfOfThePortalsBranch() {
+        assertEquals(Branch.PORTALS, CampaignProgress.ISLANDS_FEEDER)
+        assertEquals(10, CampaignProgress.islandsUnlockCount())
+        val portals = Campaign.levels(Branch.PORTALS)
+        val islands = Campaign.levels(Branch.ISLANDS)
+        var progress = winAll(CampaignProgress.EMPTY, trunk)
+        // Other branches do not count towards the islands.
+        for (branch in listOf(Branch.WALLS, Branch.FAR, Branch.LINES, Branch.LOCKS)) {
+            progress = winAll(progress, Campaign.levels(branch))
+        }
+        progress = winAll(progress, portals.take(9))
+        assertFalse(progress.isBranchOpen(Branch.ISLANDS))
+        assertFalse(progress.isUnlocked(islands[0]))
+        progress = win(progress, portals[9])
+        assertEquals(10, progress.completedCount(Branch.PORTALS))
+        assertTrue(progress.isBranchOpen(Branch.ISLANDS))
+        assertTrue(progress.isUnlocked(islands[0]))
+        assertFalse(progress.isUnlocked(islands[1]))
+        progress = win(progress, islands[0])
+        assertTrue(progress.isUnlocked(islands[1]))
+        assertFalse(progress.isUnlocked(islands[2]))
+    }
+
+    @Test
+    fun portalsAndLocksDoNotOpenMixed() {
+        var progress = winAll(CampaignProgress.EMPTY, trunk)
+        progress = winAll(progress, Campaign.levels(Branch.PORTALS))
+        progress = winAll(progress, Campaign.levels(Branch.LOCKS))
+        progress = winAll(progress, Campaign.levels(Branch.ISLANDS))
+        assertFalse(progress.isBranchOpen(Branch.MIXED))
+        assertEquals(listOf(Branch.WALLS, Branch.FAR, Branch.LINES), CampaignProgress.MIXED_FEEDERS)
+    }
+
+    @Test
     fun completedLevelStaysOpenWithoutItsPrerequisites() {
         val walls = Campaign.levels(Branch.WALLS)
         val progress = CampaignProgress.parse("${walls[4].id}:2")

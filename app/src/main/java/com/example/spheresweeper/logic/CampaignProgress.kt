@@ -24,8 +24,11 @@ class RecordResult(
  * A level is completed once it has at least one star. Unlocking:
  * - the first trunk level is always open, and every level opens when the one before it in its
  *   branch is completed;
- * - the walls, far and lines branches open once the whole trunk is completed;
- * - the mixed branch opens once half of each of those three branches (10 of 20) is completed;
+ * - the walls, far, lines, portals and locks branches open once the whole trunk is completed;
+ * - the mixed branch opens once half of each of the walls, far and lines branches (10 of 20) is
+ *   completed;
+ * - the islands branch opens once half of the portals branch (10 of 20) is completed, since its
+ *   islands are joined by portals;
  * - a completed level stays open even if the rules above would close it.
  *
  * [serialize] and [parse] turn progress into one String and back, for simple key-value storage.
@@ -43,9 +46,10 @@ class CampaignProgress private constructor(private val best: Map<String, Int>) {
     /** True when the first level of [branch] is open. */
     fun isBranchOpen(branch: Branch): Boolean = when (branch) {
         Branch.TRUNK -> true
-        Branch.WALLS, Branch.FAR, Branch.LINES ->
+        Branch.WALLS, Branch.FAR, Branch.LINES, Branch.PORTALS, Branch.LOCKS ->
             completedCount(Branch.TRUNK) == Campaign.levels(Branch.TRUNK).size
         Branch.MIXED -> MIXED_FEEDERS.all { completedCount(it) >= mixedUnlockCount(it) }
+        Branch.ISLANDS -> completedCount(ISLANDS_FEEDER) >= islandsUnlockCount()
     }
 
     fun isUnlocked(level: LevelSpec): Boolean {
@@ -92,6 +96,12 @@ class CampaignProgress private constructor(private val best: Map<String, Int>) {
 
         /** Completed levels of [branch] needed to open [Branch.MIXED]: half of the branch, rounded up. */
         fun mixedUnlockCount(branch: Branch): Int = (Campaign.levels(branch).size + 1) / 2
+
+        /** Branch whose progress opens [Branch.ISLANDS]. */
+        val ISLANDS_FEEDER: Branch = Branch.PORTALS
+
+        /** Completed levels of [ISLANDS_FEEDER] needed to open [Branch.ISLANDS]: half of it, rounded up. */
+        fun islandsUnlockCount(): Int = (Campaign.levels(ISLANDS_FEEDER).size + 1) / 2
 
         /**
          * Stars for one game: none for a loss; for a win one star, one more without losing a life

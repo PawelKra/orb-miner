@@ -23,12 +23,23 @@ package com.example.spheresweeper.logic
  * in work queues, so a call to [run] only looks at what changed. Pairs are only formed between
  * constraints that share an unknown cell.
  *
+ * Cells outside [present] (ocean) are never unknown and never count, also not for the mine counter.
+ *
+ * Locks follow [MinesweeperBoard]: the number of a cell with lock threshold T is not used while fewer
+ * than T cells are revealed, a zero on such a cell does not spread, and when the count reaches T a
+ * revealed zero spreads at once. Its constraint joins the rules from then on.
+ *
  * The instance can be reused: [load] starts over with a new layout. [moveMine] changes the layout under
  * unknown cells while keeping everything deduced so far, which lets a generator repair a layout and
  * continue from where the solver got stuck.
  */
-class LogicSolver(val neighbors: Array<IntArray>) {
+class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null) {
     val cellCount: Int = neighbors.size
+
+    private val present: BooleanArray = present?.copyOf() ?: BooleanArray(cellCount) { true }
+
+    /** Cells that take part in the game. */
+    val presentCount: Int = this.present.count { it }
 
     /** Cells whose lists contain c are watchers[watchStart[c] until watchStart[c + 1]]. */
     private val watchStart = IntArray(cellCount + 1)
@@ -71,7 +82,16 @@ class LogicSolver(val neighbors: Array<IntArray>) {
     private var pairHead = 0
     private var pairSize = 0
 
-    private val floodStack = IntArray(cellCount)
+    /** Each cell is pushed once when revealed and a lock cell once more when its lock opens. */
+    private val floodStack = IntArray(2 * cellCount)
+    private var floodTop = 0
+
+    /** Per cell: revealed cells needed before its number is used, 0 without a lock. */
+    private val lockThreshold = IntArray(cellCount)
+
+    /** Lock cells by rising threshold; those before [nextLock] are open. */
+    private var lockOrder = IntArray(0)
+    private var nextLock = 0
 
     /** Stamps for the unknown cells of the first constraint of a pair and for its partners. */
     private val markA = IntArray(cellCount)
@@ -95,10 +115,10 @@ class LogicSolver(val neighbors: Array<IntArray>) {
     var markedCount: Int = 0
         private set
 
-    val unknownCount: Int get() = cellCount - revealedCount - markedCount
+    val unknownCount: Int get() = presentCount - revealedCount - markedCount
 
-    /** True once every safe cell is revealed. */
-    val isSolved: Boolean get() = revealedCount == cellCount - mineCount
+    /** True once every present safe cell is revealed. */
+    val isSolved: Boolean get() = revealedCount == presentCount - mineCount
 
     fun isMine(cell: Int): Boolean = mine[cell]
 
@@ -107,6 +127,11 @@ class LogicSolver(val neighbors: Array<IntArray>) {
     fun isRevealed(cell: Int): Boolean = state[cell] == REVEALED
 
     fun isMarked(cell: Int): Boolean = state[cell] == MARKED
+
+    fun isPresent(cell: Int): Boolean = present[cell]
+
+    /** True when the number of [cell] may be used: it has no lock or enough cells are revealed. */
+    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= revealedCount
 
     /** Number shown on [cell] once revealed: mines in its list. */
     fun number(cell: Int): Int = number[cell]
@@ -117,14 +142,31 @@ class LogicSolver(val neighbors: Array<IntArray>) {
     /** Order in which cells were resolved: 0 for the first, -1 while unknown. */
     internal fun resolveOrder(cell: Int): Int = order[cell]
 
-    /** Starts over with the layout [mines] (true = mine); every cell becomes unknown. */
-    fun load(mines: BooleanArray) {
+    /**
+     * Starts over with the layout [mines] (true = mine) and the locks [lockThresholds] (per cell, 0 =
+     * no lock; null = no locks); every present cell becomes unknown.
+     */
+    fun load(mines: BooleanArray, lockThresholds: IntArray? = null) {
         require(mines.size == cellCount) { "layout has ${mines.size} cells, expected $cellCount" }
+        require(lockThresholds == null || lockThresholds.size == cellCount) { "lock thresholds need $cellCount cells" }
         var count = 0
+        var locks = 0
         for (cell in 0 until cellCount) {
+            require(present[cell] || !mines[cell]) { "cell $cell is not present but holds a mine" }
             mine[cell] = mines[cell]
             if (mines[cell]) count++
+            val threshold = lockThresholds?.get(cell) ?: 0
+            require(threshold >= 0) { "cell $cell has negative lock threshold" }
+            lockThreshold[cell] = threshold
+            if (threshold > 0) locks++
         }
+        if (lockOrder.size != locks) lockOrder = IntArray(locks)
+        var k = 0
+        for (cell in 0 until cellCount) {
+            if (lockThreshold[cell] > 0) lockOrder[k++] = cell
+        }
+        sortByThreshold(lockOrder)
+        nextLock = 0
         mineCount = count
         for (cell in 0 until cellCount) {
             var n = 0
@@ -135,7 +177,7 @@ class LogicSolver(val neighbors: Array<IntArray>) {
             unknownIn[cell] = neighbors[cell].size
         }
         markedIn.fill(0)
-        state.fill(UNKNOWN)
+        for (cell in 0 until cellCount) state[cell] = if (present[cell]) UNKNOWN else ABSENT
         order.fill(-1)
         steps = 0
         revealedCount = 0
@@ -149,7 +191,7 @@ class LogicSolver(val neighbors: Array<IntArray>) {
 
     /** Reveals a safe unknown [cell] given from outside (the start cell); zeros spread as in the game. */
     fun reveal(cell: Int) {
-        require(state[cell] == UNKNOWN) { "cell $cell is not unknown" }
+        require(state[cell] == UNKNOWN) { "cell $cell is not unknown or not present" }
         require(!mine[cell]) { "cell $cell is a mine" }
         flood(cell)
     }
@@ -202,7 +244,7 @@ class LogicSolver(val neighbors: Array<IntArray>) {
     }
 
     private fun applySingle(cell: Int) {
-        if (state[cell] != REVEALED || unknownIn[cell] == 0) return
+        if (state[cell] != REVEALED || unknownIn[cell] == 0 || !isLockOpen(cell)) return
         val left = number[cell] - markedIn[cell]
         if (left == 0) {
             for (nb in neighbors[cell]) {
@@ -220,7 +262,7 @@ class LogicSolver(val neighbors: Array<IntArray>) {
      * the first pair that resolves something and queues [a] again for the partners not yet checked.
      */
     private fun applyPairs(a: Int) {
-        if (state[a] != REVEALED || unknownIn[a] == 0) return
+        if (state[a] != REVEALED || unknownIn[a] == 0 || !isLockOpen(a)) return
         val leftA = number[a] - markedIn[a]
         val s = nextStamp()
         for (nb in neighbors[a]) {
@@ -233,7 +275,7 @@ class LogicSolver(val neighbors: Array<IntArray>) {
                 val b = watchers[k]
                 if (seen[b] == s) continue
                 seen[b] = s
-                if (state[b] != REVEALED || unknownIn[b] == 0) continue
+                if (state[b] != REVEALED || unknownIn[b] == 0 || !isLockOpen(b)) continue
                 if (checkPair(a, leftA, b, s)) {
                     enqueuePair(a)
                     return
@@ -310,34 +352,41 @@ class LogicSolver(val neighbors: Array<IntArray>) {
         return false
     }
 
-    /** Reveals the safe unknown [start] and spreads through zero cells, like [MinesweeperBoard]. */
+    /**
+     * Reveals the safe unknown [start] and spreads through zero cells, like [MinesweeperBoard]: a zero
+     * under a closed lock waits, and locks opened on the way spread their revealed zeros.
+     */
     private fun flood(start: Int) {
-        var top = 0
+        floodTop = 0
         setRevealed(start)
-        floodStack[top++] = start
-        while (top > 0) {
-            val cell = floodStack[--top]
-            if (number[cell] != 0) continue
+        while (floodTop > 0) {
+            val cell = floodStack[--floodTop]
+            if (number[cell] != 0 || !isLockOpen(cell)) continue
             for (nb in neighbors[cell]) {
-                if (state[nb] == UNKNOWN) {
-                    setRevealed(nb)
-                    floodStack[top++] = nb
-                }
+                if (state[nb] == UNKNOWN) setRevealed(nb)
             }
         }
     }
 
+    /** Reveals [cell], queues it for spreading in [flood] and opens the locks the new count reaches. */
     private fun setRevealed(cell: Int) {
         check(!mine[cell]) { "deduced cell $cell as safe but it is a mine" }
         state[cell] = REVEALED
         order[cell] = steps++
         revealedCount++
+        floodStack[floodTop++] = cell
         for (k in watchStart[cell] until watchStart[cell + 1]) {
             val w = watchers[k]
             unknownIn[w]--
             if (state[w] == REVEALED) enqueue(w)
         }
         if (unknownIn[cell] > 0) enqueue(cell)
+        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
+            val opened = lockOrder[nextLock++]
+            if (state[opened] != REVEALED) continue
+            if (unknownIn[opened] > 0) enqueue(opened)
+            if (number[opened] == 0) floodStack[floodTop++] = opened
+        }
     }
 
     private fun markMine(cell: Int) {
@@ -387,15 +436,40 @@ class LogicSolver(val neighbors: Array<IntArray>) {
         return ++stampB
     }
 
+    /** Sorts [cells] by rising lock threshold, then by index (insertion sort; there are few locks). */
+    private fun sortByThreshold(cells: IntArray) {
+        for (i in 1 until cells.size) {
+            val cell = cells[i]
+            var j = i - 1
+            while (j >= 0 && lockThreshold[cells[j]] > lockThreshold[cell]) {
+                cells[j + 1] = cells[j]
+                j--
+            }
+            cells[j + 1] = cell
+        }
+    }
+
     companion object {
         private const val UNKNOWN: Byte = 0
         private const val REVEALED: Byte = 1
         private const val MARKED: Byte = 2
 
-        /** Solves [mines] on [neighbors] from the revealed [start]; true if no guess is needed. */
-        fun solves(neighbors: Array<IntArray>, mines: BooleanArray, start: Int): Boolean {
-            val solver = LogicSolver(neighbors)
-            solver.load(mines)
+        /** Not present (ocean): never unknown, revealed or marked. */
+        private const val ABSENT: Byte = 3
+
+        /**
+         * Solves [mines] on [neighbors] from the revealed [start]; true if no guess is needed. [present]
+         * and [lockThresholds] are as in the constructor and [load].
+         */
+        fun solves(
+            neighbors: Array<IntArray>,
+            mines: BooleanArray,
+            start: Int,
+            present: BooleanArray? = null,
+            lockThresholds: IntArray? = null,
+        ): Boolean {
+            val solver = LogicSolver(neighbors, present)
+            solver.load(mines, lockThresholds)
             solver.reveal(start)
             return solver.run()
         }

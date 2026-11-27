@@ -43,6 +43,11 @@ enum class Screen { MENU, CAMPAIGN, GAME }
  */
 sealed class GameConfig {
     abstract val frequency: Int
+
+    /**
+     * Mines expected before the board exists. With ocean the board puts the mine density on its real
+     * land, so [MinesweeperBoard.mineCount] may differ by a few; once a board exists, it counts.
+     */
     abstract val mines: Int
     abstract val lives: Int
     abstract val hints: Int
@@ -50,7 +55,7 @@ sealed class GameConfig {
     /** Free game: a new random board of [size] on every start. */
     data class Free(val size: BoardSize) : GameConfig() {
         override val frequency: Int get() = size.frequency
-        override val mines: Int get() = size.mines
+        override val mines: Int get() = size.expectedMines
         override val lives: Int get() = size.lives
         override val hints: Int get() = size.hints
     }
@@ -97,7 +102,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var board by mutableStateOf<MinesweeperBoard?>(null)
         private set
 
-    /** Walls and far cells of the current game. */
+    /** Ocean, walls, portals, far cells and line cells of the current game. */
     var layout by mutableStateOf<BoardLayout?>(null)
         private set
 
@@ -342,7 +347,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         var best = -1
         var bestScore = Float.NEGATIVE_INFINITY
         for (cell in 0 until b.cellCount) {
-            if (b.isMine(cell) || b.isRevealed(cell) || b.isFlagged(cell)) continue
+            if (!b.isPresent(cell) || b.isMine(cell) || b.isRevealed(cell) || b.isFlagged(cell)) continue
             orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
             // Facing the viewer counts in [-1, 1]; touching the revealed area outweighs it.
             var score = scratch[2]
@@ -398,10 +403,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * The board a move on [cell] applies to, or null when the move must be ignored: another screen or
+     * game, a finished game, or a cell that is not in play (out of range or ocean).
+     */
     private fun activeBoard(cell: Int, forGame: Int): MinesweeperBoard? {
         val b = board ?: return null
         if (screen != Screen.GAME || forGame != gameId) return null
-        if (cell < 0 || cell >= b.cellCount) return null
+        if (cell < 0 || cell >= b.cellCount || !b.isPresent(cell)) return null
         if (b.status == GameStatus.WON || b.status == GameStatus.LOST) return null
         return b
     }
@@ -449,21 +458,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------------------------------------------------------------- lifecycle of a game
 
-    /** Walls, far cells and a board already opened at [start], ready to be shown. */
+    /** Board features and a board already opened at [start], ready to be shown. */
     private class PreparedGame(val layout: BoardLayout, val board: MinesweeperBoard, val start: Int)
 
     /**
      * Builds a game for [forConfig] on [g] (which has its frequency) without touching view-model
      * state, so it can run on any thread. Mines come from [NoGuessGenerator], which guarantees that
      * the whole board can be solved from the start cell by logic alone, and the start cell is
-     * revealed right away. A free game draws a new board every time; a level is built from its seed.
+     * revealed right away. A free game draws a new board every time, with the ocean, portals and locks
+     * of its [BoardSize] and the size's mine density on the drawn land ([BoardSize.minesFor]); a level
+     * is built from its seed.
      */
     private fun prepareGame(g: SphereGeometry, forConfig: GameConfig): PreparedGame = when (forConfig) {
         is GameConfig.Free -> {
             val size = forConfig.size
-            val newLayout = BoardLayout.generate(g, size)
-            val generated = NoGuessGenerator.generate(newLayout.scopes, size.mines)
-            val started = MinesweeperBoard(newLayout.scopes, size.mines, lives = size.lives)
+            val newLayout = BoardLayout.generate(
+                g, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells,
+                lineCount = size.lineCells, islandCount = size.islands, portalCount = size.portals,
+            )
+            val mines = size.minesFor(newLayout)
+            val generated = NoGuessGenerator.generate(newLayout, mines, lockCount = size.locks)
+            val started = MinesweeperBoard(
+                newLayout.scopes, mines, lives = size.lives,
+                present = newLayout.presentMask(), lockThresholds = generated.lockThresholds,
+            )
             started.startWith(generated.mines, generated.start)
             PreparedGame(newLayout, started, generated.start)
         }

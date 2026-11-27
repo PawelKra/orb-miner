@@ -11,7 +11,9 @@ import org.junit.Test
  * Each level is built with [Campaign.buildLevel] and reduced to a fingerprint: 64-bit FNV-1a over the
  * UTF-8 bytes of a canonical text ([describe]) holding the id, the frequency, the start cell, the
  * sorted mines, every wall as its corner indices in generator order, the sorted far cells and every
- * line cell with its side and row. [GOLDEN] holds the expected fingerprint of every level.
+ * line cell with its side and row. Levels with ocean, portals or locks also list the ocean cells,
+ * the portal pairs and the lock thresholds; levels without them keep the shorter text, so their
+ * fingerprints do not depend on these features. [GOLDEN] holds the expected fingerprint of every level.
  *
  * A changed fingerprint means players get a different board for that level: progress and stars they
  * earned would then belong to a board they never saw. Changes in [StableRandom], [BoardLayout],
@@ -44,7 +46,7 @@ class CampaignGoldenTest {
                     problems.joinToString("\n"),
             )
         }
-        assertEquals(90, GOLDEN.size)
+        assertEquals(150, GOLDEN.size)
     }
 
     /** A few levels written out in plain numbers, so a failure here shows what moved. */
@@ -173,6 +175,66 @@ class CampaignGoldenTest {
             "mixed-18" to "8319b183fff28f96",
             "mixed-19" to "a80acd71498c001b",
             "mixed-20" to "d07f253e36579748",
+            "portals-01" to "5e61969b0dccdee2",
+            "portals-02" to "7aa069aca7ccc445",
+            "portals-03" to "6d9ee28cfafe8a30",
+            "portals-04" to "a0a2c51c91190e70",
+            "portals-05" to "de9f91f20de34bc2",
+            "portals-06" to "b38a60fa886e0a47",
+            "portals-07" to "6ac44a4687516382",
+            "portals-08" to "7380a6fe8118890c",
+            "portals-09" to "0895dc36dd727cd9",
+            "portals-10" to "e6b713a30e44921f",
+            "portals-11" to "8d3d9d749f970fc1",
+            "portals-12" to "6fe8c023622dd335",
+            "portals-13" to "bf5dbdc002c4d66e",
+            "portals-14" to "5cc23d3e64781165",
+            "portals-15" to "946ecf32a3baf7e8",
+            "portals-16" to "4db5ab9928db8269",
+            "portals-17" to "2330dc2161b6a66c",
+            "portals-18" to "1b0c9a5e60ffd944",
+            "portals-19" to "4a8db9a851433c97",
+            "portals-20" to "7ece956a6b372470",
+            "locks-01" to "979460d24e510d62",
+            "locks-02" to "7ffc7fa4398e94f0",
+            "locks-03" to "cfad7d118d4914f3",
+            "locks-04" to "6abb606cc9daf24e",
+            "locks-05" to "f77f305fd6f5a238",
+            "locks-06" to "9d077eea760b189c",
+            "locks-07" to "f99501aed0083265",
+            "locks-08" to "c3b2a5e49629ec9d",
+            "locks-09" to "f9d8828f5bbb9724",
+            "locks-10" to "3b4de681639aef09",
+            "locks-11" to "d202f72d8844f1c1",
+            "locks-12" to "71c588c7c04acda5",
+            "locks-13" to "dfa24038f7c3f2af",
+            "locks-14" to "189438aed9ed792a",
+            "locks-15" to "c59ddcd37871864d",
+            "locks-16" to "92a47ad46fef490f",
+            "locks-17" to "219979e27dbe9213",
+            "locks-18" to "46a2cc217deec9c8",
+            "locks-19" to "df3652d5c3fb9262",
+            "locks-20" to "dbf8b551cd73b4ce",
+            "islands-01" to "7318c3f4f64db16e",
+            "islands-02" to "34fec21a9eb89198",
+            "islands-03" to "63bc004f09da1c1a",
+            "islands-04" to "513d2b122e841f72",
+            "islands-05" to "3cc51cbddf2fbc33",
+            "islands-06" to "46dbb74114945bec",
+            "islands-07" to "182663fbe5709d75",
+            "islands-08" to "4194fca5012ade60",
+            "islands-09" to "1da904dcf40f67df",
+            "islands-10" to "78fc4a30e4088b9d",
+            "islands-11" to "ff96b3bd348187cd",
+            "islands-12" to "83e1ede9d2933a29",
+            "islands-13" to "d7a1fc511a1f5a25",
+            "islands-14" to "dac246d31b2a8228",
+            "islands-15" to "13c7edd2ee14d34a",
+            "islands-16" to "45f35b765b6389f7",
+            "islands-17" to "3ca9bf585daa3d2a",
+            "islands-18" to "3c200d3c3b1cc724",
+            "islands-19" to "b012e10f9aeb2a50",
+            "islands-20" to "b443387ee1d4f8cf",
         )
 
         private fun build(id: String): PreparedLevel {
@@ -198,6 +260,10 @@ class CampaignGoldenTest {
          * Canonical text of a built level, for example
          * `id=walls-01;f=3;start=40;mines=2,17;walls=[5,6,7][...];far=;lines=12:3:13,14,15|...`.
          * Walls keep the order and direction the generator gives them, far and line cells are sorted.
+         *
+         * Only when the level has them, three parts follow: `;ocean=` with the sorted ocean cells,
+         * `;portals=` with every pair as `a-b` (lower cell first) in pair order, and `;locks=` with
+         * every lock as `cell:threshold` in cell order.
          */
         fun describe(level: PreparedLevel): String {
             val layout = level.layout
@@ -216,6 +282,21 @@ class CampaignGoldenTest {
                         "$it:${layout.lineSide(it)}:${layout.linePath(it).joinToString(",")}"
                     },
                 )
+                val ocean = cells.filter { !layout.isPresent(it) }
+                if (ocean.isNotEmpty()) append(";ocean=").append(ocean.joinToString(","))
+                if (layout.portalPairCount > 0) {
+                    append(";portals=")
+                    append(
+                        (0 until layout.portalPairCount).joinToString("|") { pair ->
+                            val pairCells = cells.filter { layout.portalPair(it) == pair }
+                            "${pairCells[0]}-${pairCells[1]}"
+                        },
+                    )
+                }
+                val locks = cells.filter { level.board.lockThreshold(it) > 0 }
+                if (locks.isNotEmpty()) {
+                    append(";locks=").append(locks.joinToString("|") { "$it:${level.board.lockThreshold(it)}" })
+                }
             }
         }
 

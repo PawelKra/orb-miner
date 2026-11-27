@@ -15,13 +15,30 @@ class CampaignTest {
     private fun geometry(frequency: Int): SphereGeometry =
         geometries.getOrPut(frequency) { SphereGeometry.build(frequency) }
 
+    private val sideBranches = Branch.values().filter { it != Branch.TRUNK }
+
     @Test
     fun trunkHasTenLevelsAndEachBranchTwenty() {
         assertEquals(10, Campaign.levels(Branch.TRUNK).size)
-        for (branch in listOf(Branch.WALLS, Branch.FAR, Branch.LINES, Branch.MIXED)) {
+        assertEquals(7, sideBranches.size)
+        for (branch in sideBranches) {
             assertEquals("$branch", 20, Campaign.levels(branch).size)
         }
-        assertEquals(90, Campaign.all.size)
+        assertEquals(150, Campaign.all.size)
+    }
+
+    @Test
+    fun newBranchesComeAfterTheOldOnesWithTheirOwnIds() {
+        assertEquals(
+            listOf(Branch.TRUNK, Branch.WALLS, Branch.FAR, Branch.LINES, Branch.MIXED, Branch.PORTALS, Branch.LOCKS, Branch.ISLANDS),
+            Branch.values().toList(),
+        )
+        assertEquals("portals-01", Campaign.levels(Branch.PORTALS).first().id)
+        assertEquals("locks-20", Campaign.levels(Branch.LOCKS).last().id)
+        assertEquals("islands-01", Campaign.levels(Branch.ISLANDS).first().id)
+        // The first 90 levels keep their order: trunk, walls, far, lines, mixed.
+        assertEquals("mixed-20", Campaign.all[89].id)
+        assertEquals("portals-01", Campaign.all[90].id)
     }
 
     @Test
@@ -61,21 +78,33 @@ class CampaignTest {
             assertTrue("$label lives", level.lives in 1..3)
             assertTrue("$label hints", level.hints in 0..2)
             assertTrue("$label mines", level.mines > 0)
-            // Biggest list a start cell can have: a far cell sees up to 18 cells, a line cell 2 * frequency.
+            // Biggest list a start cell can have: a far cell sees up to 18 cells, a line cell 2 * frequency,
+            // a portal one more than its neighbours.
             val widestScope = maxOf(
-                6,
+                if (level.portals > 0 || level.islands > 1) 7 else 6,
                 if (level.farCells > 0) 18 else 0,
                 if (level.lineCells > 0) 2 * level.frequency else 0,
             )
-            assertTrue("$label mines fit", level.mines < level.cellCount - 1 - widestScope)
+            assertTrue("$label mines fit", level.mines + level.locks < level.playCells - 1 - widestScope)
 
             val hasWalls = level.branch == Branch.WALLS || level.branch == Branch.MIXED
             val hasFar = level.branch == Branch.FAR || level.branch == Branch.MIXED
             val hasLines = level.branch == Branch.LINES || level.branch == Branch.MIXED
+            val hasIslands = level.branch == Branch.ISLANDS
+            val hasLocks = level.branch == Branch.LOCKS
             assertEquals("$label walls", hasWalls, level.walls > 0)
             assertEquals("$label wall length", hasWalls, level.wallMaxLength > 0)
             assertEquals("$label far", hasFar, level.farCells > 0)
             assertEquals("$label lines", hasLines, level.lineCells > 0)
+            assertEquals("$label islands", hasIslands, level.islands > 0)
+            assertEquals("$label locks", hasLocks, level.locks > 0)
+            when (level.branch) {
+                Branch.PORTALS -> assertTrue("$label portals", level.portals in 1..4)
+                Branch.ISLANDS -> assertTrue("$label portals", level.portals in 0..2)
+                else -> assertEquals("$label portals", 0, level.portals)
+            }
+            if (hasIslands) assertTrue("$label islands", level.islands in 2..4)
+            if (hasLocks) assertTrue("$label locks", level.locks in 1..6)
             if (hasWalls) assertTrue("$label wall lengths", level.wallMinLength in 2..level.wallMaxLength)
         }
     }
@@ -85,9 +114,10 @@ class CampaignTest {
         val trunk = Campaign.levels(Branch.TRUNK)
         assertEquals(2, trunk.first().frequency)
         assertTrue(trunk.first().mineDensity in 0.10..0.12)
-        for (branch in listOf(Branch.WALLS, Branch.FAR, Branch.LINES, Branch.MIXED)) {
+        for (branch in sideBranches) {
             val levels = Campaign.levels(branch)
-            assertEquals("$branch first", 3, levels.first().frequency)
+            // Two islands need frequency 4 (BoardLayout.maxIslandCount), so that branch starts there.
+            assertEquals("$branch first", if (branch == Branch.ISLANDS) 4 else 3, levels.first().frequency)
             assertEquals("$branch last", 8, levels.last().frequency)
             assertTrue("$branch last density", levels.last().mineDensity in 0.19..0.20)
             assertEquals("$branch first lives", 3, levels.first().lives)
@@ -95,6 +125,56 @@ class CampaignTest {
             assertEquals("$branch first hints", 2, levels.first().hints)
             assertEquals("$branch last hints", 0, levels.last().hints)
         }
+        for (branch in listOf(Branch.PORTALS, Branch.LOCKS, Branch.ISLANDS)) {
+            assertTrue("$branch first density", Campaign.levels(branch).first().mineDensity in 0.13..0.15)
+        }
+        assertEquals(1, Campaign.levels(Branch.PORTALS).first().portals)
+        assertEquals(4, Campaign.levels(Branch.PORTALS).last().portals)
+        assertEquals(1, Campaign.levels(Branch.LOCKS).first().locks)
+        assertEquals(6, Campaign.levels(Branch.LOCKS).last().locks)
+        assertEquals(2, Campaign.levels(Branch.ISLANDS).first().islands)
+        assertEquals(4, Campaign.levels(Branch.ISLANDS).last().islands)
+        assertEquals(0, Campaign.levels(Branch.ISLANDS).first().portals)
+        assertEquals(2, Campaign.levels(Branch.ISLANDS).last().portals)
+    }
+
+    @Test
+    fun islandLevelsFitTheirSphereAndCountMinesOnLand() {
+        for (level in Campaign.all) {
+            if (level.islands == 0) {
+                assertEquals(level.id, level.cellCount, level.playCells)
+                continue
+            }
+            assertTrue(level.id, level.islands <= BoardLayout.maxIslandCount(geometry(level.frequency)))
+            assertTrue(level.id, level.playCells < level.cellCount)
+        }
+    }
+
+    /**
+     * Islands levels put the branch's density on the land of the built board. Each level is the ramp
+     * density rounded to whole mines, so it is off by at most half a mine. Between neighbouring levels
+     * the ramp rises by about 0.29 points, while rounding may move each level by up to 0.48 points on
+     * the smallest land (about 105 cells): the real density may dip, but by less than the ramp step
+     * plus one rounding. MAX_ROUNDING_DIP of 0.5 points allows that dip on the pinned boards, while a
+     * count based on anything other than the real land (such as the expected land, which gave dips of
+     * 1.6 points) fails.
+     */
+    @Test
+    fun islandLevelsPutTheBranchDensityOnTheirRealLand() {
+        var previous: Double? = null
+        for (spec in Campaign.levels(Branch.ISLANDS)) {
+            val level = Campaign.buildLevel(spec, geometry(spec.frequency))
+            val land = level.layout.presentCount
+            val density = level.mines.size.toDouble() / land
+            val nominal = Campaign.nominalDensity(spec)
+            assertEquals("${spec.id} density on $land land cells", nominal, density, 0.5 / land + 1e-9)
+            if (previous != null) {
+                assertTrue("${spec.id} density $density after $previous", density >= previous - MAX_ROUNDING_DIP)
+            }
+            previous = density
+        }
+        val densities = Campaign.levels(Branch.ISLANDS).map { Campaign.nominalDensity(it) }
+        for (i in 1 until densities.size) assertTrue("nominal density rises", densities[i] > densities[i - 1])
     }
 
     @Test
@@ -112,6 +192,9 @@ class CampaignTest {
                 assertTrue("$label wall length", b.wallMaxLength >= a.wallMaxLength)
                 assertTrue("$label far", b.farCells >= a.farCells)
                 assertTrue("$label lines", b.lineCells >= a.lineCells)
+                assertTrue("$label islands", b.islands >= a.islands)
+                assertTrue("$label portals", b.portals >= a.portals)
+                assertTrue("$label locks", b.locks >= a.locks)
                 assertTrue("$label lives", b.lives <= a.lives)
                 assertTrue("$label hints", b.hints <= a.hints)
             }
@@ -132,21 +215,35 @@ class CampaignTest {
             }
             assertEquals("$label far cells", spec.farCells, layout.farCount)
             assertEquals("$label line cells", spec.lineCells, layout.lineCount)
+            assertEquals("$label islands", maxOf(1, spec.islands), layout.islandCount)
+            assertEquals("$label portal pairs", maxOf(0, spec.islands - 1) + spec.portals, layout.portalPairCount)
+            if (spec.islands == 0) assertEquals("$label no ocean", layout.scopes.size, layout.presentCount)
 
             assertSame(spec, level.spec)
-            assertEquals("$label mines", spec.mines, level.mines.size)
+            // Without ocean the board has the nominal count; with islands the count follows the land.
+            val mineCount = Campaign.mineCount(spec, layout)
+            if (spec.islands == 0) assertEquals("$label nominal mines", spec.mines, mineCount)
+            assertEquals("$label mines", mineCount, level.mines.size)
             val board = level.board
-            assertEquals("$label board mines", spec.mines, board.mineCount)
+            assertEquals("$label board mines", mineCount, board.mineCount)
             assertEquals("$label lives", spec.lives, board.lives)
             assertEquals("$label status", GameStatus.PLAYING, board.status)
             assertTrue("$label start revealed", board.isRevealed(level.start))
             assertEquals("$label start shows 0", 0, board.adjacentMines(level.start))
             for (cell in level.mines) assertTrue("$label mine $cell", board.isMine(cell))
+            assertEquals("$label present cells", layout.presentCount, board.presentCount)
+            assertEquals("$label locks", spec.locks, board.lockCount)
+            val locks = IntArray(layout.scopes.size) { board.lockThreshold(it) }
+            for (cell in 0 until layout.scopes.size) {
+                assertEquals("$label presence $cell", layout.isPresent(cell), board.isPresent(cell))
+                if (locks[cell] > 0) assertFalse("$label lock on mine $cell", board.isMine(cell))
+                if (layout.isPortal(cell)) assertFalse("$label mine on portal $cell", board.isMine(cell))
+            }
 
             val mines = BooleanArray(layout.scopes.size)
             for (cell in level.mines) mines[cell] = true
-            val solver = LogicSolver(layout.scopes)
-            solver.load(mines)
+            val solver = LogicSolver(layout.scopes, layout.presentMask())
+            solver.load(mines, locks)
             solver.reveal(level.start)
             assertTrue("$label solvable without guessing", solver.run())
         }
@@ -167,6 +264,9 @@ class CampaignTest {
             for (cell in 0 until geometry.cellCount) {
                 assertEquals("${spec.id} far $cell", a.layout.isFar(cell), b.layout.isFar(cell))
                 assertEquals("${spec.id} line $cell", a.layout.lineSide(cell), b.layout.lineSide(cell))
+                assertEquals("${spec.id} island $cell", a.layout.islandOf(cell), b.layout.islandOf(cell))
+                assertEquals("${spec.id} portal $cell", a.layout.portalPartner(cell), b.layout.portalPartner(cell))
+                assertEquals("${spec.id} lock $cell", a.board.lockThreshold(cell), b.board.lockThreshold(cell))
             }
         }
     }
@@ -196,5 +296,10 @@ class CampaignTest {
         assertEquals(0.0, ramp.at(1.0), 1e-9)
         assertEquals(0.0, ramp.at(2.0), 1e-9)
         assertEquals(4.0, Ramp(4.0).at(0.7), 1e-9)
+    }
+
+    private companion object {
+        /** Largest drop of real mine density between neighbouring islands levels, as a share (0.5 points). */
+        const val MAX_ROUNDING_DIP = 0.005
     }
 }

@@ -72,9 +72,9 @@ import com.example.spheresweeper.ui.theme.SpaceColors
 import kotlin.math.roundToInt
 
 /**
- * Campaign map: the trunk as a path of levels, a fork, then one section per branch. Levels are laid
- * out in rows of [PATH_COLUMNS] that snake left to right and back, joined by lines. On entry the map
- * scrolls to the level the player is most likely to play next.
+ * Campaign map: the trunk as a path of levels, a fork, then one section per branch in [BRANCH_ORDER].
+ * Levels are laid out in rows of [PATH_COLUMNS] that snake left to right and back, joined by lines. On
+ * entry the map scrolls to the level the player is most likely to play next.
  */
 @Composable
 fun CampaignScreen(vm: GameViewModel) {
@@ -132,9 +132,8 @@ fun CampaignScreen(vm: GameViewModel) {
                         .fillMaxWidth()
                         .height(44.dp),
                 )
-                val branches = listOf(Branch.WALLS, Branch.FAR, Branch.LINES, Branch.MIXED)
                 if (twoColumns) {
-                    for (pair in branches.chunked(2)) {
+                    for (pair in BRANCH_ORDER.chunked(2)) {
                         Row(
                             modifier = Modifier
                                 .widthIn(max = SECTION_MAX_WIDTH * 2 + SECTION_GAP)
@@ -151,11 +150,13 @@ fun CampaignScreen(vm: GameViewModel) {
                                     modifier = Modifier.weight(1f),
                                 )
                             }
+                            // A lone last section keeps the width of one column.
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
                         }
                         Spacer(Modifier.height(SECTION_GAP))
                     }
                 } else {
-                    for (branch in branches) {
+                    for (branch in BRANCH_ORDER) {
                         BranchSection(
                             branch = branch,
                             progress = progress,
@@ -179,6 +180,9 @@ internal fun branchAccent(branch: Branch): Color = when (branch) {
     Branch.FAR -> SpaceColors.Gold
     Branch.LINES -> Color(0xFF7DF9E1)
     Branch.MIXED -> SpaceColors.Violet
+    Branch.PORTALS -> Color(0xFFFF5CD8)
+    Branch.LOCKS -> Color(0xFFC6F25A)
+    Branch.ISLANDS -> SpaceColors.Blue
 }
 
 internal fun branchNameRes(branch: Branch): Int = when (branch) {
@@ -187,6 +191,9 @@ internal fun branchNameRes(branch: Branch): Int = when (branch) {
     Branch.FAR -> R.string.branch_far
     Branch.LINES -> R.string.branch_lines
     Branch.MIXED -> R.string.branch_mixed
+    Branch.PORTALS -> R.string.branch_portals
+    Branch.LOCKS -> R.string.branch_locks
+    Branch.ISLANDS -> R.string.branch_islands
 }
 
 /** [CampaignProgress.MAX_STARS] stars in a row, the first [stars] filled. Drawing only, no semantics. */
@@ -213,11 +220,12 @@ private fun frontier(progress: CampaignProgress, branch: Branch): LevelSpec? =
 
 /**
  * Level the map scrolls to: after a level game the next one to play in that branch (or the played
- * level itself when the branch is done); otherwise the first open, not completed level of the campaign.
+ * level itself when the branch is done); otherwise the first open, not completed level in the order
+ * the map shows them: the trunk, then the branches in [BRANCH_ORDER].
  */
 private fun focusLevel(progress: CampaignProgress, lastPlayed: LevelSpec?): LevelSpec? {
     if (lastPlayed != null) return frontier(progress, lastPlayed.branch) ?: lastPlayed
-    return Campaign.all.firstOrNull { progress.isUnlocked(it) && !progress.isCompleted(it) }
+    return frontier(progress, Branch.TRUNK) ?: BRANCH_ORDER.firstNotNullOfOrNull { frontier(progress, it) }
 }
 
 /** Layout positions needed to scroll the focused level into the middle of the map. */
@@ -269,11 +277,11 @@ private fun CampaignTopBar(totalStars: Int, onBack: () -> Unit) {
     }
 }
 
-/** Where the trunk splits: one stem coming down, four drops in the colours of the branches. */
+/** Where the trunk splits: one stem coming down, one drop per branch in its colour, in map order. */
 @Composable
 private fun ForkConnector(trunkDone: Boolean, modifier: Modifier = Modifier) {
     val stemColor = if (trunkDone) branchAccent(Branch.TRUNK).copy(alpha = 0.8f) else SpaceColors.PanelBorder
-    val drops = listOf(Branch.WALLS, Branch.FAR, Branch.LINES, Branch.MIXED)
+    val drops = BRANCH_ORDER
     Canvas(modifier) {
         val stroke = PATH_STROKE.toPx()
         val midY = size.height * 0.45f
@@ -375,9 +383,10 @@ private fun BranchHeader(branch: Branch, progress: CampaignProgress, open: Boole
                 style = MaterialTheme.typography.bodySmall,
                 color = SpaceColors.TextSecondary,
             )
-            if (branch == Branch.MIXED) {
+            val feeders = feederProgress(branch, progress)
+            if (feeders.isNotEmpty()) {
                 Text(
-                    text = mixedFeederProgress(progress),
+                    text = feeders,
                     style = MaterialTheme.typography.bodySmall,
                     color = SpaceColors.TextMuted,
                 )
@@ -389,7 +398,8 @@ private fun BranchHeader(branch: Branch, progress: CampaignProgress, open: Boole
 @Composable
 private fun unlockCondition(branch: Branch): String = when (branch) {
     Branch.TRUNK -> ""
-    Branch.WALLS, Branch.FAR, Branch.LINES -> stringResource(R.string.campaign_unlock_after_trunk)
+    Branch.WALLS, Branch.FAR, Branch.LINES, Branch.PORTALS, Branch.LOCKS ->
+        stringResource(R.string.campaign_unlock_after_trunk)
     Branch.MIXED -> {
         val feeder = CampaignProgress.MIXED_FEEDERS.first()
         stringResource(
@@ -398,13 +408,25 @@ private fun unlockCondition(branch: Branch): String = when (branch) {
             Campaign.levels(feeder).size,
         )
     }
+    Branch.ISLANDS -> stringResource(
+        R.string.campaign_unlock_islands,
+        CampaignProgress.islandsUnlockCount(),
+        Campaign.levels(CampaignProgress.ISLANDS_FEEDER).size,
+    )
 }
 
-/** "Walls 4/10 · Far reach 2/10 · Lines 0/10": progress towards opening the mixed branch. */
+/**
+ * Progress towards opening [branch] when other branches open it, for example
+ * "Walls 4/10 · Far reach 2/10 · Lines 0/10" for the mixed branch. Empty for the other branches.
+ */
 @Composable
-private fun mixedFeederProgress(progress: CampaignProgress): String {
-    val parts = CampaignProgress.MIXED_FEEDERS.map { feeder ->
-        val needed = CampaignProgress.mixedUnlockCount(feeder)
+private fun feederProgress(branch: Branch, progress: CampaignProgress): String {
+    val feeders: List<Pair<Branch, Int>> = when (branch) {
+        Branch.MIXED -> CampaignProgress.MIXED_FEEDERS.map { it to CampaignProgress.mixedUnlockCount(it) }
+        Branch.ISLANDS -> listOf(CampaignProgress.ISLANDS_FEEDER to CampaignProgress.islandsUnlockCount())
+        Branch.TRUNK, Branch.WALLS, Branch.FAR, Branch.LINES, Branch.PORTALS, Branch.LOCKS -> emptyList()
+    }
+    val parts = feeders.map { (feeder, needed) ->
         stringResource(
             R.string.campaign_feeder_progress,
             stringResource(branchNameRes(feeder)),
@@ -603,6 +625,15 @@ private fun PulsingGlow(color: Color, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Branches below the fork, in map order: first the five that open after the trunk, then the two that
+ * open after progress in other branches. Mixed follows the walls, far and lines branches it builds
+ * on, and islands come last because they open only after the portals branch.
+ */
+private val BRANCH_ORDER = listOf(
+    Branch.WALLS, Branch.FAR, Branch.LINES, Branch.PORTALS, Branch.LOCKS, Branch.MIXED, Branch.ISLANDS,
+)
+
 private const val PATH_COLUMNS = 5
 private val PATH_ROW_HEIGHT = 84.dp
 private val PATH_STROKE = 3.dp
@@ -615,5 +646,5 @@ private val GLOW_SPREAD = 12.dp
 private val SECTION_MAX_WIDTH = 520.dp
 private val SECTION_GAP = 16.dp
 
-/** From this width the four branches sit in two columns. */
+/** From this width the branches sit in two columns. */
 private val TWO_COLUMN_MIN_WIDTH = 760.dp

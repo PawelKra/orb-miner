@@ -24,6 +24,13 @@
         <item quantity="many">miny: %d</item>
         <item quantity="other">miny: %d</item>
     </plurals>
+    <!-- Boards with ocean: the count depends on the drawn land, so the menu shows an estimate. -->
+    <plurals name="mines_count_approx">
+        <item quantity="one">miny: ~%d</item>
+        <item quantity="few">miny: ~%d</item>
+        <item quantity="many">miny: ~%d</item>
+        <item quantity="other">miny: ~%d</item>
+    </plurals>
 
     <plurals name="lives_count">
         <item quantity="one">życia: %d</item>
@@ -72,11 +79,15 @@
     <string name="branch_far">Daleki zasięg</string>
     <string name="branch_lines">Linie</string>
     <string name="branch_mixed">Mieszane</string>
+    <string name="branch_portals">Przeskoki</string>
+    <string name="branch_locks">Zamki</string>
+    <string name="branch_islands">Wyspy</string>
     <string name="campaign_fraction">%1$d/%2$d</string>
     <string name="campaign_branch_progress_desc">%1$s, ukończone poziomy: %2$d z %3$d</string>
     <string name="campaign_branch_locked_desc">%1$s, gałąź zablokowana</string>
     <string name="campaign_unlock_after_trunk">Ukończ wszystkie poziomy gałęzi Początek, aby ją otworzyć.</string>
     <string name="campaign_unlock_mixed">Ukończ co najmniej %1$d z %2$d poziomów w każdej z gałęzi: Ściany, Daleki zasięg, Linie.</string>
+    <string name="campaign_unlock_islands">Ukończ %1$d z %2$d poziomów gałęzi Przeskoki, aby ją otworzyć.</string>
     <string name="campaign_feeder_progress">%1$s %2$d/%3$d</string>
     <string name="campaign_node_desc">%1$s, poziom %2$d: %3$s</string>
     <string name="campaign_node_locked">zablokowany</string>
