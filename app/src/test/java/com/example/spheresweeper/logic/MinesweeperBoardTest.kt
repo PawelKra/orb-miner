@@ -495,6 +495,61 @@ class MinesweeperBoardTest {
         assertEquals(GameStatus.PLAYING, board.status)
     }
 
+    // ---------------------------------------------------------------- prepared layouts
+
+    @Test
+    fun startWithUsesGivenLayoutAndRevealsStart() {
+        val size = BoardSize.MEDIUM
+        val neighbors = geometry(size).neighbors
+        for (seed in 0 until 10) {
+            val layout = NoGuessGenerator.generate(neighbors, size.mines, Random(seed))
+            val board = MinesweeperBoard(neighbors, 1, Random(99), lives = size.lives)
+
+            val result = board.startWith(layout.mines, layout.start)
+
+            assertTrue("seed $seed result $result", result == MoveResult.REVEALED || result == MoveResult.WON)
+            assertEquals(size.mines, board.mineCount)
+            assertEquals(if (result == MoveResult.WON) GameStatus.WON else GameStatus.PLAYING, board.status)
+            for (cell in 0 until board.cellCount) {
+                assertEquals("seed $seed cell $cell", cell in layout.mines, board.isMine(cell))
+            }
+            assertTrue(board.isRevealed(layout.start))
+            assertEquals(0, board.adjacentMines(layout.start))
+
+            val solver = LogicSolver(neighbors)
+            solver.load(BooleanArray(board.cellCount) { board.isMine(it) })
+            solver.reveal(layout.start)
+            for (cell in 0 until board.cellCount) {
+                assertEquals("seed $seed flood cell $cell", solver.isRevealed(cell), board.isRevealed(cell))
+            }
+        }
+    }
+
+    @Test
+    fun startWithClearsFlagOnStart() {
+        val board = MinesweeperBoard(geometry(BoardSize.TINY).neighbors, 6)
+        assertTrue(board.toggleFlag(0))
+        val far = farCell(board.neighbors, 0)
+        board.startWith(intArrayOf(far), 0)
+        assertFalse(board.isFlagged(0))
+        assertEquals(0, board.flagCount)
+        assertTrue(board.isRevealed(0))
+        assertEquals(1, board.mineCount)
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun startWithRejectsPlacedMines() {
+        val board = MinesweeperBoard(geometry(BoardSize.TINY).neighbors, 6, Random(1))
+        board.reveal(0)
+        board.startWith(intArrayOf(5), 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun startWithRejectsMinedStart() {
+        val board = MinesweeperBoard(geometry(BoardSize.TINY).neighbors, 6)
+        board.startWith(intArrayOf(3, 7), 7)
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private fun countMines(board: MinesweeperBoard): Int =

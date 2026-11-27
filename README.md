@@ -26,31 +26,66 @@ Dotknięcie działa tylko na polach z przodu kuli. Ruch palca dłuższy niż pr�
 ## Zasady
 
 1. Liczba na odkrytym polu mówi, ile min leży na polach sąsiednich (5 albo 6 sąsiadów).
-2. Miny trafiają na planszę dopiero przy pierwszym odkryciu. Pierwsze pole i wszyscy jego sąsiedzi są zawsze bezpieczni.
+2. Gra startuje z już odkrytym obszarem. Kula obraca się tak, że pole startowe leży na środku widoku, a pulsujący pierścień je wskazuje.
+   Generator rozkłada miny tak, że całą planszę rozwiążesz od tego obszaru samą logiką, bez zgadywania.
 3. Odkrycie pola z zerem odkrywa cały spójny obszar zer i jego obramowanie z liczbami.
 4. Wygrywasz, gdy odkryjesz wszystkie pola bez min.
 5. Ściany to świecące linie na krawędziach pól. Liczba nie liczy min po drugiej stronie ściany, a odkrywanie zer nie przechodzi przez ścianę.
 6. Pola dalekiego zasięgu mają złoty pierścień. Ich liczba liczy miny w dwóch pierścieniach sąsiadów (do 18 pól), też bez przechodzenia przez ściany.
-7. Przycisk z żarówką odkrywa bezpieczne pole przy już odkrytym obszarze i obraca kulę w jego stronę.
-8. Na większych planszach masz kilka żyć. Trafiona mina zabiera jedno życie, zostaje na kuli jako czerwone pole i liczy się jak flaga.
-9. Przegrywasz, gdy stracisz ostatnie życie. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
+7. Pola liniowe mają turkusową liczbę i strzałkę przy jednym boku. Ich liczba nie liczy sąsiadów, tylko miny w prostym rzędzie pól, który biegnie od pola w stronę strzałki.
+   Rząd przechodzi przez każdy sześciokąt na wprost, z boku na bok przeciwległy. Kończy się przed ścianą, na pięciokącie albo po `2·n` polach.
+   Po odkryciu pola liniowego cienka linia pokazuje jego rząd. Zero na takim polu odkrywa cały rząd.
+8. Ocean to ciemna woda na kuli. Pola oceanu nie biorą udziału w grze: nie mają min ani liczb, nie da się ich kliknąć i żadna liczba ich nie liczy.
+   Na planszy z oceanem ląd tworzy kilka wysp, a ocean zajmuje od 20 do 35% pól. Wyspy nigdy się nie stykają, łączą je tylko przeskoki.
+9. Przeskok to para odległych pól z takim samym znakiem w tym samym kolorze. Na zakrytym polu znak to pierścień z kropką, na odkrytym cienki pierścień przy brzegu.
+   Oba pola przeskoku są dla siebie dodatkowymi sąsiadami: liczba każdego z nich liczy też drugie pole pary, a odkrywanie zer przechodzi przez przeskok. Na polach przeskoków nigdy nie ma min.
+10. Pole z zamkiem pokazuje kłódkę z liczbą. Ta liczba mówi, ile pól na całej kuli musisz jeszcze odkryć, żeby zamek się otworzył.
+    Dopóki zamek jest zamknięty, odkryte pole z kłódką nie pokazuje swojej liczby, nie odkrywa sąsiednich zer i nie działa na nim akord.
+    Po otwarciu pole pokazuje zwykłą liczbę z małą otwartą kłódką. Na polach z zamkiem nigdy nie ma min.
+11. Przycisk z żarówką odkrywa bezpieczne pole przy już odkrytym obszarze i obraca kulę w jego stronę.
+12. Na większych planszach masz kilka żyć. Trafiona mina zabiera jedno życie, zostaje na kuli jako czerwone pole i liczy się jak flaga.
+13. Przegrywasz, gdy stracisz ostatnie życie. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
 
-Licznik u góry pokazuje liczbę min minus liczbę flag i trafionych min. Zegar startuje przy pierwszym odkryciu.
+Licznik u góry pokazuje liczbę min minus liczbę flag i trafionych min. Zegar startuje przy Twoim pierwszym ruchu: odkryciu, fladze, akordzie albo podpowiedzi.
 Cyfry obracają się razem z widokiem: ich podstawa leży zawsze na boku pola, który na ekranie jest najbardziej poziomy.
 Gra zapisuje najlepszy czas dla każdego rozmiaru planszy.
 
 ## Rozmiary planszy
 
-| Rozmiar | n | Pola | Miny | Życia | Podpowiedzi | Ściany (max długość) | Pola dalekiego zasięgu |
-|---------|---|------|------|-------|-------------|----------------------|------------------------|
-| Tiny | 2 | 42 | 6 | 1 | 0 | 0 | 0 |
-| Small | 3 | 92 | 14 | 1 | 1 | 2 (4) | 3 |
-| Medium | 4 | 162 | 28 | 2 | 1 | 3 (6) | 5 |
-| Large | 5 | 252 | 45 | 3 | 2 | 4 (8) | 8 |
-| Huge | 6 | 362 | 65 | 4 | 2 | 5 (10) | 11 |
-| Giant | 8 | 642 | 125 | 5 | 3 | 7 (14) | 18 |
+| Rozmiar | n | Pola | Miny | Życia | Podpowiedzi | Ściany (max długość) | Pola dalekiego zasięgu | Pola liniowe | Wyspy | Dodatkowe przeskoki | Zamki |
+|---------|---|------|------|-------|-------------|----------------------|------------------------|--------------|-------|---------------------|-------|
+| Tiny | 2 | 42 | 6 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Small | 3 | 92 | 14 | 1 | 1 | 2 (4) | 3 | 2 | 0 | 0 | 0 |
+| Medium | 4 | 162 | 28 | 2 | 1 | 3 (6) | 5 | 4 | 0 | 0 | 0 |
+| Large | 5 | 252 | 45 | 3 | 2 | 4 (8) | 8 | 6 | 0 | 1 | 2 |
+| Huge | 6 | 362 | 65 | 4 | 2 | 5 (10) | 11 | 8 | 2 | 1 | 3 |
+| Giant | 8 | 642 | 125 | 5 | 3 | 7 (14) | 18 | 12 | 3 | 2 | 5 |
+
+Wyspy 0 oznaczają kulę bez oceanu. Kolumna „Pola” liczy też ocean.
+Kolumna „Miny” wyznacza gęstość min: liczbę min podzieloną przez liczbę wszystkich pól. Miny leżą tylko na lądzie.
+Na planszy z wyspami gra liczy miny od wylosowanego lądu przy tej samej gęstości. Min jest więc mniej, np. około 47 na Huge i 91 na Giant.
+Wyspy łączą przeskoki, o jedną parę mniej niż wysp. Kolumna „Dodatkowe przeskoki” podaje pary ponad te połączenia.
 
 Wszystkie te liczby zmienisz w jednym miejscu: `app/src/main/java/com/example/spheresweeper/logic/GameConstants.kt`.
+
+## Kampania
+
+Kampania to drzewko 150 stałych poziomów. Każdy poziom ma zawsze tę samą planszę, więc możesz go powtarzać i poprawiać wynik.
+
+1. Pień „Początek” ma 10 poziomów na małych planszach, bez ścian i pól specjalnych.
+2. Po ukończeniu całego pnia otwiera się pięć gałęzi po 20 poziomów: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki” i „Zamki”.
+   Każda z nich uczy jednej mechaniki. „Przeskoki” mają od 1 do 4 par przeskoków, a „Zamki” od 1 do 6 zamków.
+3. Gałąź „Mieszane” (20 poziomów) łączy ściany, pola dalekiego zasięgu i pola liniowe. Otwiera się, gdy ukończysz co najmniej 10 poziomów w każdej z tych trzech gałęzi.
+4. Gałąź „Wyspy” (20 poziomów) ma od 2 do 4 wysp połączonych przeskokami i do 2 dodatkowych par przeskoków. Otwiera się, gdy ukończysz co najmniej 10 poziomów gałęzi „Przeskoki”.
+5. W każdej gałęzi kolejny poziom otwiera się po ukończeniu poprzedniego. Ukończony poziom zostaje otwarty.
+
+Mapa pokazuje gałęzie w kolejności: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki”, „Zamki”, „Mieszane”, „Wyspy”.
+Najpierw stoją gałęzie otwierane przez pień, potem te, które otwiera postęp w innych gałęziach.
+
+Za poziom dostajesz do 3 gwiazdek: 1 za wygraną, 1 za grę bez utraty życia i 1 za grę bez podpowiedzi.
+Gra zapamiętuje najlepszy wynik każdego poziomu, a słabsza powtórka go nie obniża.
+Mapa pokazuje gwiazdki pod każdym poziomem. Pulsująca poświata wskazuje w każdej gałęzi następny poziom do zagrania.
+Parametry poziomów zmienisz w tabeli `Campaign.TUNING` w pliku `app/src/main/java/com/example/spheresweeper/logic/Campaign.kt`.
 
 ## Wersje narzędzi
 

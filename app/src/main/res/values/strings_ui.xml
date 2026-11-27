@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="menu_subtitle">Saper na kuli z sześciokątów</string>
-    <string name="menu_choose_board">Wybierz planszę</string>
 
     <string name="board_tiny">Maleńka</string>
     <string name="board_small">Mała</string>
@@ -24,6 +23,13 @@
         <item quantity="few">miny: %d</item>
         <item quantity="many">miny: %d</item>
         <item quantity="other">miny: %d</item>
+    </plurals>
+    <!-- Boards with ocean: the count depends on the drawn land, so the menu shows an estimate. -->
+    <plurals name="mines_count_approx">
+        <item quantity="one">miny: ~%d</item>
+        <item quantity="few">miny: ~%d</item>
+        <item quantity="many">miny: ~%d</item>
+        <item quantity="other">miny: ~%d</item>
     </plurals>
 
     <plurals name="lives_count">
@@ -61,6 +67,42 @@
     <string name="result_lost_subtitle">Mina eksplodowała. Spróbuj jeszcze raz.</string>
     <string name="result_time">Czas: %1$s</string>
     <string name="result_new_best">Nowy rekord!</string>
+
+    <string name="menu_free_play">Wolna gra</string>
+
+    <string name="campaign_title">Kampania</string>
+    <string name="campaign_card_subtitle">Ukończone poziomy: %1$d/%2$d</string>
+    <string name="campaign_stars_total">★ %1$d/%2$d</string>
+    <string name="campaign_stars_total_desc">Gwiazdki: %1$d z %2$d</string>
+    <string name="branch_trunk">Początek</string>
+    <string name="branch_walls">Ściany</string>
+    <string name="branch_far">Daleki zasięg</string>
+    <string name="branch_lines">Linie</string>
+    <string name="branch_mixed">Mieszane</string>
+    <string name="branch_portals">Przeskoki</string>
+    <string name="branch_locks">Zamki</string>
+    <string name="branch_islands">Wyspy</string>
+    <string name="campaign_fraction">%1$d/%2$d</string>
+    <string name="campaign_branch_progress_desc">%1$s, ukończone poziomy: %2$d z %3$d</string>
+    <string name="campaign_branch_locked_desc">%1$s, gałąź zablokowana</string>
+    <string name="campaign_unlock_after_trunk">Ukończ wszystkie poziomy gałęzi Początek, aby ją otworzyć.</string>
+    <string name="campaign_unlock_mixed">Ukończ co najmniej %1$d z %2$d poziomów w każdej z gałęzi: Ściany, Daleki zasięg, Linie.</string>
+    <string name="campaign_unlock_islands">Ukończ %1$d z %2$d poziomów gałęzi Przeskoki, aby ją otworzyć.</string>
+    <string name="campaign_feeder_progress">%1$s %2$d/%3$d</string>
+    <string name="campaign_node_desc">%1$s, poziom %2$d: %3$s</string>
+    <string name="campaign_node_locked">zablokowany</string>
+    <string name="campaign_node_not_completed">nieukończony</string>
+    <string name="campaign_node_stars">gwiazdki %1$d z %2$d</string>
+    <string name="campaign_level_label">%1$s · %2$d/%3$d</string>
+    <string name="action_back">Wróć</string>
+    <string name="action_map">Wróć do mapy kampanii</string>
+    <string name="action_map_short">Mapa</string>
+    <string name="action_next_level">Następny poziom</string>
+
+    <string name="result_stars_desc">Zdobyte gwiazdki: %1$d z %2$d</string>
+    <string name="result_best_stars">Najlepszy wynik</string>
+    <string name="result_best_stars_desc">Najlepszy wynik: %1$d z %2$d gwiazdek</string>
+    <string name="result_new_star_record">Nowy rekord gwiazdek!</string>
 
     <string name="loading">Budowanie kuli…</string>
 </resources>
