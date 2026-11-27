@@ -1,0 +1,150 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GRADLE_VERSION: '8.7'
+
+jobs:
+  build:
+    name: Unit tests and debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Ensure Gradle wrapper
+        run: |
+          if [ ! -f ./gradlew ] || [ ! -f ./gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Gradle wrapper missing, generating it with Gradle $GRADLE_VERSION"
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+          fi
+          chmod +x ./gradlew
+
+      - name: Run unit tests and assemble debug APK
+        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SphereSweeper-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+
+  release:
+    name: Release APK
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Ensure Gradle wrapper
+        run: |
+          if [ ! -f ./gradlew ] || [ ! -f ./gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Gradle wrapper missing, generating it with Gradle $GRADLE_VERSION"
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+          fi
+          chmod +x ./gradlew
+
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            if printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH" 2>/dev/null && [ -s "$KEYSTORE_PATH" ]; then
+              {
+                echo "SIGNING_STORE_FILE=$KEYSTORE_PATH"
+                echo "SIGNING_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+                echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+                echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD"
+                echo "SIGNING_MODE=signed"
+              } >> "$GITHUB_ENV"
+              echo "Release keystore decoded, the APK will be signed with the release key."
+              exit 0
+            fi
+            rm -f "$KEYSTORE_PATH"
+            echo "::warning::KEYSTORE_BASE64 is not valid base64, falling back to the debug signing key."
+          else
+            echo "::warning::Signing secrets are not set, falling back to the debug signing key."
+          fi
+          echo "SIGNING_MODE=debug-signed" >> "$GITHUB_ENV"
+
+      - name: Assemble release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Rename release APK
+        run: |
+          APK="$(ls app/build/outputs/apk/release/*.apk | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "::error::No release APK found"
+            exit 1
+          fi
+          if [ "$SIGNING_MODE" = "signed" ]; then
+            OUT="SphereSweeper-${GITHUB_REF_NAME}.apk"
+          else
+            OUT="SphereSweeper-${GITHUB_REF_NAME}-debug-signed.apk"
+          fi
+          cp "$APK" "$OUT"
+          echo "RELEASE_APK=$OUT" >> "$GITHUB_ENV"
+          echo "Release APK: $OUT"
+
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SphereSweeper-release-apk
+          path: ${{ env.RELEASE_APK }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.RELEASE_APK }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true

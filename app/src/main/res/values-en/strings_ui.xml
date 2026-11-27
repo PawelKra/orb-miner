@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_subtitle">Minesweeper on a hexagon sphere</string>
+    <string name="menu_choose_board">Choose a board</string>
+
+    <string name="board_tiny">Tiny</string>
+    <string name="board_small">Small</string>
+    <string name="board_medium">Medium</string>
+    <string name="board_large">Large</string>
+    <string name="board_huge">Huge</string>
+    <string name="board_giant">Giant</string>
+    <string name="board_details">%1$s · %2$s</string>
+
+    <plurals name="cells_count">
+        <item quantity="one">%d cell</item>
+        <item quantity="other">%d cells</item>
+    </plurals>
+    <plurals name="mines_count">
+        <item quantity="one">%d mine</item>
+        <item quantity="other">%d mines</item>
+    </plurals>
+
+    <string name="best_label">Best</string>
+    <string name="best_time">Best: %1$s</string>
+    <string name="best_time_none">No record yet</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="setting_long_press">Flag by long press</string>
+    <string name="setting_long_press_desc">Hold a cell to place a flag. A tap reveals the cell immediately.</string>
+    <string name="setting_haptics">Haptic feedback</string>
+    <string name="setting_haptics_desc">On flags, chords and explosions</string>
+
+    <string name="hint_double_tap">Tap to reveal · double tap to flag · drag to rotate</string>
+    <string name="hint_long_press">Tap to reveal · hold to flag · drag to rotate</string>
+
+    <string name="hud_mines_remaining">Mines remaining: %1$d</string>
+    <string name="hud_time">Time: %1$s</string>
+    <string name="action_restart">Restart</string>
+    <string name="action_menu">Back to menu</string>
+    <string name="action_menu_short">Menu</string>
+    <string name="action_play_again">Play again</string>
+
+    <string name="result_won">You won!</string>
+    <string name="result_won_subtitle">All safe cells revealed</string>
+    <string name="result_lost">Boom!</string>
+    <string name="result_lost_subtitle">A mine exploded. Try again.</string>
+    <string name="result_time">Time: %1$s</string>
+    <string name="result_new_best">New best time!</string>
+
+    <string name="loading">Building the sphere…</string>
+</resources>

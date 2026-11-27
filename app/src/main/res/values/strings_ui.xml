@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_subtitle">Saper na kuli z sześciokątów</string>
+    <string name="menu_choose_board">Wybierz planszę</string>
+
+    <string name="board_tiny">Maleńka</string>
+    <string name="board_small">Mała</string>
+    <string name="board_medium">Średnia</string>
+    <string name="board_large">Duża</string>
+    <string name="board_huge">Ogromna</string>
+    <string name="board_giant">Gigantyczna</string>
+    <string name="board_details">%1$s · %2$s</string>
+
+    <plurals name="cells_count">
+        <item quantity="one">%d pole</item>
+        <item quantity="few">%d pola</item>
+        <item quantity="many">%d pól</item>
+        <item quantity="other">%d pola</item>
+    </plurals>
+    <!-- Label form ("miny: 6") instead of "6 min", which reads as minutes. -->
+    <plurals name="mines_count">
+        <item quantity="one">miny: %d</item>
+        <item quantity="few">miny: %d</item>
+        <item quantity="many">miny: %d</item>
+        <item quantity="other">miny: %d</item>
+    </plurals>
+
+    <string name="best_label">Rekord</string>
+    <string name="best_time">Rekord: %1$s</string>
+    <string name="best_time_none">Brak rekordu</string>
+
+    <string name="settings_title">Ustawienia</string>
+    <string name="setting_long_press">Flaga przez przytrzymanie</string>
+    <string name="setting_long_press_desc">Przytrzymaj pole, aby postawić flagę. Stuknięcie odkrywa pole od razu.</string>
+    <string name="setting_haptics">Wibracje</string>
+    <string name="setting_haptics_desc">Przy flagach, akordach i wybuchu</string>
+
+    <string name="hint_double_tap">Stuknij, aby odkryć · stuknij dwa razy, aby postawić flagę · przeciągnij, aby obrócić</string>
+    <string name="hint_long_press">Stuknij, aby odkryć · przytrzymaj, aby postawić flagę · przeciągnij, aby obrócić</string>
+
+    <string name="hud_mines_remaining">Pozostałe miny: %1$d</string>
+    <string name="hud_time">Czas: %1$s</string>
+    <string name="action_restart">Zagraj od nowa</string>
+    <string name="action_menu">Wróć do menu</string>
+    <string name="action_menu_short">Menu</string>
+    <string name="action_play_again">Jeszcze raz</string>
+
+    <string name="result_won">Wygrana!</string>
+    <string name="result_won_subtitle">Wszystkie bezpieczne pola odkryte</string>
+    <string name="result_lost">Wybuch!</string>
+    <string name="result_lost_subtitle">Mina eksplodowała. Spróbuj jeszcze raz.</string>
+    <string name="result_time">Czas: %1$s</string>
+    <string name="result_new_best">Nowy rekord!</string>
+
+    <string name="loading">Budowanie kuli…</string>
+</resources>
