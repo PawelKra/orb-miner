@@ -27,6 +27,7 @@ object GameThemes {
                 revealed = 0xFFF7F7F5,
                 border = 0xFF8693A2,
                 ocean = 0xFF7F96AB to 0xFF6C8296,
+                coast = 0xFF29303C,
                 numbers = listOf(0xFF3E5A79, 0xFF4B6D58, 0xFF985A4B, 0xFF655484, 0xFF85663F, 0xFF3F6D70, 0xFF4F5058, 0xFF895870),
                 ink = 0xFF2C3644,
                 far = 0xFF856419,
@@ -83,6 +84,7 @@ object GameThemes {
                 revealed = 0xFFFAFAF7,
                 border = 0xFF8D998E,
                 ocean = 0xFF8AA1A7 to 0xFF768E97,
+                coast = 0xFF323B4A,
                 numbers = listOf(0xFF45607E, 0xFF4E7055, 0xFF9C5C4B, 0xFF6D5887, 0xFF87683A, 0xFF467579, 0xFF55594F, 0xFF8D5971),
                 ink = 0xFF363C35,
                 far = 0xFF86661E,
@@ -139,6 +141,8 @@ object GameThemes {
                 revealed = 0xFFFCFCFD,
                 border = 0xFF6B7C99,
                 ocean = 0xFF647A98 to 0xFF536987,
+                // Nearly black: the darkest of the pastel oceans needs it for 3:1 against the coast.
+                coast = 0xFF11151A,
                 numbers = listOf(0xFF36508A, 0xFF3F6A57, 0xFF954B48, 0xFF5E4F88, 0xFF8A6337, 0xFF3E6B72, 0xFF434858, 0xFF874E69),
                 ink = 0xFF25324E,
                 far = 0xFF80601C,
@@ -196,6 +200,12 @@ object GameThemes {
                 border = 0xFF2B2933,
                 borderAlpha = 0.7f,
                 ocean = 0xFF2E3546 to 0xFF242B3A,
+                // A light coast on the dark ocean and the dark revealed cells; the dark casing sets it
+                // off from the light covered cells.
+                coast = 0xFFC9D6EA,
+                coastCasing = 0xFF1C1A22,
+                wave = 0xFF96C3FF,
+                waveAlpha = 0.45f,
                 numbers = listOf(0xFFB2C6DC, 0xFFB3CAB4, 0xFFE2BBB3, 0xFFCBBFDD, 0xFFDCC4A0, 0xFFA9CBC9, 0xFFDEDAE4, 0xFFDCBBCB),
                 ink = 0xFF25232E,
                 far = 0xFFE3C47E,
@@ -324,13 +334,15 @@ private val DUSK_LIGHTING = pastelLighting(revealedFlat = 0.82f, revealedSheen =
  * Ball palette of a pastel theme. The defaults fit a light theme: paper-coloured revealed cells with
  * dark numbers and no digit shadow, light outlines around icons, a soft shadow under the ball and a
  * faint white halo and gloss. The gloss lies under the digits, which keeps dark digits at their
- * contrast against the cell.
+ * contrast against the cell. Ocean waves are translucent white and the dark [coast] needs no casing;
+ * the dot on covered cells takes half black, which keeps it at 3:1 or more against the lit fill.
  */
 private fun pastelSphere(
     covered: List<Long>,
     revealed: Long,
     border: Long,
     ocean: Pair<Long, Long>,
+    coast: Long,
     numbers: List<Long>,
     ink: Long,
     far: Long,
@@ -345,6 +357,11 @@ private fun pastelSphere(
     portals: List<Long>,
     core: List<Long>,
     borderAlpha: Float = 0.55f,
+    coastCasing: Long = 0x00000000,
+    wave: Long = 0xFFFFFFFF,
+    waveAlpha: Float = 0.6f,
+    coveredDotDarken: Float = 0.5f,
+    coveredDotLighten: Float = 0f,
     lockText: Long = revealed,
     digitShadow: Long = ink,
     digitShadowAlpha: Float = 0f,
@@ -372,6 +389,11 @@ private fun pastelSphere(
     border = withAlpha(border, borderAlpha),
     oceanSouth = Rgb.hex(ocean.first),
     oceanNorth = Rgb.hex(ocean.second),
+    wave = withAlpha(wave, waveAlpha),
+    coast = argb(coast),
+    coastCasing = argb(coastCasing),
+    coveredDotDarken = coveredDotDarken,
+    coveredDotLighten = coveredDotLighten,
     numbers = IntArray(numbers.size + 1) { if (it == 0) argb(ink) else argb(numbers[it - 1]) },
     digitShadow = argb(digitShadow),
     digitShadowAlpha = digitShadowAlpha,
@@ -504,6 +526,13 @@ private fun spaceSphere(): SpherePalette = SpherePalette(
     border = argb(0xF00A0C12),
     oceanSouth = Rgb(0.03f, 0.1f, 0.3f),
     oceanNorth = Rgb(0.03f, 0.1f, 0.3f),
+    wave = withAlpha(0xFF96C3FF, 0.45f),
+    coast = argb(0xFFC9D6EA),
+    coastCasing = argb(0xFF05060B),
+    // The covered cells run from dim to bright neon under the strong lighting: a nearly black dot on
+    // the bright ones, a light one where the cell is too dark for any darker dot to stand out.
+    coveredDotDarken = 0.85f,
+    coveredDotLighten = 0.7f,
     numbers = intArrayOf(
         argb(0xFFFFFFFF),
         argb(0xFF5AA8FF), // 1 blue
