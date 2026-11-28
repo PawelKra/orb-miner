@@ -3,9 +3,8 @@ package com.example.spheresweeper.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
-import com.example.spheresweeper.logic.BoardFeature
-import com.example.spheresweeper.logic.BoardFeatures
 import com.example.spheresweeper.logic.BoardSize
+import com.example.spheresweeper.logic.GameStats
 
 /** Settings, best times and campaign progress stored locally in SharedPreferences. */
 class GamePreferences(context: Context) {
@@ -31,10 +30,31 @@ class GamePreferences(context: Context) {
         get() = prefs.getString(KEY_CAMPAIGN_PROGRESS, null)
         set(value) = prefs.edit { putString(KEY_CAMPAIGN_PROGRESS, value) }
 
-    /** Board features whose introduction card the player has closed, in the text form of [BoardFeatures.serialize]. */
-    var seenFeatures: Set<BoardFeature>
-        get() = BoardFeatures.parse(prefs.getString(KEY_SEEN_FEATURES, null))
-        set(value) = prefs.edit { putString(KEY_SEEN_FEATURES, BoardFeatures.serialize(value)) }
+    /** Whether free games are drawn with the walls and rooms of their board size. */
+    var randomWalls: Boolean
+        get() = prefs.getBoolean(KEY_RANDOM_WALLS, true)
+        set(value) = prefs.edit { putBoolean(KEY_RANDOM_WALLS, value) }
+
+    /**
+     * Board size last chosen for a two-player match, stored by its name, or null before the first choice
+     * and for a name this version does not know.
+     */
+    var matchSize: BoardSize?
+        get() {
+            val name = prefs.getString(KEY_MATCH_SIZE, null) ?: return null
+            return BoardSize.values().firstOrNull { it.name == name }
+        }
+        set(value) = prefs.edit { putString(KEY_MATCH_SIZE, value?.name) }
+
+    /** Moves per turn last chosen for a two-player match, or null before the first choice. */
+    var matchMovesPerTurn: Int?
+        get() = if (prefs.contains(KEY_MATCH_MOVES)) prefs.getInt(KEY_MATCH_MOVES, 0) else null
+        set(value) = prefs.edit { if (value == null) remove(KEY_MATCH_MOVES) else putInt(KEY_MATCH_MOVES, value) }
+
+    /** Statistics of finished games, stored in the text form of [GameStats.serialize]. */
+    var gameStats: GameStats
+        get() = GameStats.parse(prefs.getString(KEY_GAME_STATS, null))
+        set(value) = prefs.edit { putString(KEY_GAME_STATS, value.serialize()) }
 
     /** Best time in milliseconds for [size], or null when the board was never won. */
     fun bestTimeMillis(size: BoardSize): Long? {
@@ -65,7 +85,10 @@ class GamePreferences(context: Context) {
         const val KEY_BEST_PREFIX = "best_time_"
         const val KEY_CAMPAIGN_PROGRESS = "campaign_progress"
         const val KEY_THEME = "theme"
-        const val KEY_SEEN_FEATURES = "seen_features"
+        const val KEY_MATCH_SIZE = "match_size"
+        const val KEY_MATCH_MOVES = "match_moves_per_turn"
+        const val KEY_RANDOM_WALLS = "random_walls"
+        const val KEY_GAME_STATS = "game_stats"
         const val NO_TIME = -1L
     }
 }

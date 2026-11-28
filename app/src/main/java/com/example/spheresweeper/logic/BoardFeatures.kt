@@ -1,8 +1,9 @@
 package com.example.spheresweeper.logic
 
 /**
- * Kinds of cells and board parts beyond plain numbers and flags. Each one has a card that explains it
- * the first time a board shows it. The declaration order is the order in which the cards come.
+ * Kinds of cells and board parts beyond plain numbers and flags. Each one has a card that explains it,
+ * which the game screen opens on request for a board that shows it. The declaration order is the order
+ * in which the cards come.
  */
 enum class BoardFeature {
     /** Walls, free ones or the walls between rooms. */

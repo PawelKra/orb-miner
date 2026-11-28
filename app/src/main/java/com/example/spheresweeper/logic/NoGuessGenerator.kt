@@ -102,23 +102,39 @@ object NoGuessGenerator {
      * cell on a tie) is never drawn again; when no closed lock blocked it, the board gets one lock fewer.
      * Without any lock left the layouts are drawn as with [lockCount] 0, with [DEFAULT_MAX_LAYOUTS]
      * attempts of their own; [NoGuessLayout.lockRegions] then marks no cell but is not null.
+     *
+     * With [forbidEmptyLines] no line cell ([BoardLayout.isLine]) of the result has a row free of
+     * mines: such a line shows 0 and gives the player nothing to work out. The no-guess guarantee is the
+     * same as without the flag. A line cell is then never the start cell, whose list is mine-free. A
+     * layout the solver clears but that leaves a row empty gets one mine moved onto a random cell of that
+     * row (see [Work.fillEmptyLine]) and is solved again from the start, counted as a repair step. It is
+     * accepted only once it is solved with no row empty.
+     *
+     * The flag is only for boards without rooms. With rooms every line cell stands at a passage and is
+     * the only cell that sees across it, so a mine in its row could not be placed by logic, and an empty
+     * passage row is a hint in itself: it shows the way into the next room is clear.
+     *
+     * With the flag off (the default) nothing of this runs and the draws are exactly those of earlier
+     * versions, which keeps released campaign levels as they are.
+     *
+     * @throws IllegalArgumentException when [forbidEmptyLines] is set on a [layout] with rooms.
      */
     fun generate(
         layout: BoardLayout,
         mineCount: Int,
         random: Random = Random.Default,
         lockCount: Int = 0,
+        forbidEmptyLines: Boolean = false,
     ): NoGuessLayout {
-        val present = layout.presentMask()
-        val mineFree = layout.portalMask()
-        if (!layout.hasRooms) {
-            return generate(
-                layout.scopes, mineCount, random, present = present, mineFree = mineFree, lockCount = lockCount,
-            )
+        require(!forbidEmptyLines || !layout.hasRooms) { "forbidEmptyLines needs a board without rooms" }
+        val lines = if (forbidEmptyLines && layout.lineCount > 0) {
+            layout.scopes.indices.filter { layout.isLine(it) }.toIntArray()
+        } else {
+            null
         }
         return run(
-            layout.scopes, mineCount, random, DEFAULT_MAX_REPAIRS, DEFAULT_MAX_LAYOUTS, present, mineFree, lockCount,
-            RoomGates(layout),
+            layout.scopes, mineCount, random, DEFAULT_MAX_REPAIRS, DEFAULT_MAX_LAYOUTS, layout.presentMask(),
+            layout.portalMask(), lockCount, if (layout.hasRooms) RoomGates(layout) else null, lines,
         )
     }
 
@@ -151,7 +167,8 @@ object NoGuessGenerator {
         present: BooleanArray? = null,
         mineFree: BooleanArray? = null,
         lockCount: Int = 0,
-    ): NoGuessLayout = run(neighbors, mineCount, random, maxRepairs, maxLayouts, present, mineFree, lockCount, null)
+    ): NoGuessLayout =
+        run(neighbors, mineCount, random, maxRepairs, maxLayouts, present, mineFree, lockCount, null, null)
 
     /**
      * Most mines [generate] accepts on [layout] with [lockCount] locks: the room the best start cell
@@ -173,7 +190,8 @@ object NoGuessGenerator {
 
     /**
      * Both forms of [generate]: [gates] null for locks that count the whole board and any start cell,
-     * otherwise for locks on gates and a start in the root region.
+     * otherwise for locks on gates and a start in the root region. [lines] lists the cells whose list
+     * must hold at least one mine in the result (line cells with the flag of [generate]), null for none.
      */
     private fun run(
         neighbors: Array<IntArray>,
@@ -185,6 +203,7 @@ object NoGuessGenerator {
         mineFree: BooleanArray?,
         lockCount: Int,
         gates: RoomGates?,
+        lines: IntArray?,
     ): NoGuessLayout {
         val cellCount = neighbors.size
         require(mineCount >= 0) { "negative mine count $mineCount" }
@@ -192,10 +211,15 @@ object NoGuessGenerator {
         require(present == null || present.size == cellCount) { "present needs $cellCount cells" }
         require(mineFree == null || mineFree.size == cellCount) { "mineFree needs $cellCount cells" }
         val work = Work(neighbors, present, mineFree, gates)
+        // A line cell as the start would have a mine-free list, so it is left out when lines must count a mine.
+        val lineStart: BooleanArray? = lines?.let { cells ->
+            BooleanArray(cellCount).also { mask -> for (cell in cells) mask[cell] = true }
+        }
         val starts = IntArray(cellCount)
         var startCount = 0
         for (cell in 0 until cellCount) {
             if (!work.isPresent(cell) || (gates != null && !gates.root[cell])) continue
+            if (lineStart != null && lineStart[cell]) continue
             if (work.room(cell) - lockCount >= mineCount) starts[startCount++] = cell
         }
         require(startCount > 0) { "$mineCount mines do not fit next to any start area on $cellCount cells" }
@@ -241,10 +265,19 @@ object NoGuessGenerator {
             while (true) {
                 if (solver.run()) {
                     if (!changed) {
-                        return NoGuessLayout(
-                            start, work.mineCells(), repairs, attempt, locks?.copyOf() ?: IntArray(cellCount),
-                            lockRegions?.copyOf(),
-                        )
+                        if (lines == null || !work.hasEmptyLine(lines)) {
+                            return NoGuessLayout(
+                                start, work.mineCells(), repairs, attempt, locks?.copyOf() ?: IntArray(cellCount),
+                                lockRegions?.copyOf(),
+                            )
+                        }
+                        // Solved, but a line counts no mine: move a mine into its row and solve again.
+                        if (steps >= maxRepairs || !work.fillEmptyLine(layout, lines, start, random)) break
+                        steps++
+                        repairs++
+                        load()
+                        solver.reveal(start)
+                        continue
                     }
                     // Replay from the start on the final layout, so that every deduction uses final numbers.
                     for (cell in 0 until cellCount) layout[cell] = solver.isMine(cell)
@@ -688,6 +721,55 @@ object NoGuessGenerator {
             }
             if (blockers == 0 || spots == 0) return false
             layout[unwatched[random.nextInt(blockers)]] = false
+            layout[nearby[random.nextInt(spots)]] = true
+            return true
+        }
+
+        /** Mines the solver holds in the list of [cell]. */
+        private fun minesAround(cell: Int): Int {
+            var mines = 0
+            for (nb in neighbors[cell]) {
+                if (solver.isMine(nb)) mines++
+            }
+            return mines
+        }
+
+        /** True when some cell of [lines] has no mine in its list, by the solver's current mines. */
+        fun hasEmptyLine(lines: IntArray): Boolean = lines.any { minesAround(it) == 0 }
+
+        /** Scratch of [fillEmptyLine]: cells that are the only mine of some line's list. */
+        private val lastMine = BooleanArray(cellCount)
+
+        /**
+         * For a solved layout in which the first cell of [lines] (in the given order) has no mine in its
+         * list: writes the solver's mines into [layout], then moves one random mine onto a random cell of
+         * that list. The new spot is present, may hold a mine and lies outside [start] and its list, so
+         * the start still shows 0. The mine comes from a cell that is not the only mine of another line,
+         * so no other line becomes empty. Returns false when either cell is missing. The caller solves
+         * [layout] again from the start.
+         */
+        fun fillEmptyLine(layout: BooleanArray, lines: IntArray, start: Int, random: Random): Boolean {
+            for (cell in 0 until cellCount) layout[cell] = solver.isMine(cell)
+            val empty = lines.firstOrNull { minesAround(it) == 0 } ?: return false
+            var spots = 0
+            for (cell in neighbors[empty]) {
+                if (!present[cell] || noMine[cell] || cell == start || cell in neighbors[start]) continue
+                nearby[spots++] = cell
+            }
+            if (spots == 0) return false
+            lastMine.fill(false)
+            for (line in lines) {
+                if (minesAround(line) != 1) continue
+                for (nb in neighbors[line]) {
+                    if (layout[nb]) lastMine[nb] = true
+                }
+            }
+            var sources = 0
+            for (cell in 0 until cellCount) {
+                if (layout[cell] && !lastMine[cell]) unwatched[sources++] = cell
+            }
+            if (sources == 0) return false
+            layout[unwatched[random.nextInt(sources)]] = false
             layout[nearby[random.nextInt(spots)]] = true
             return true
         }

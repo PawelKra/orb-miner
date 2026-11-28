@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="match_section">Two players</string>
+    <string name="match_title">Territory</string>
+    <string name="match_card_subtitle">Two players take turns on one phone. More cells wins.</string>
+    <string name="match_rules">Cells you reveal and mines you mark correctly are yours. A safe cell marked as a mine and a mine that goes off go to your opponent. The start area belongs to nobody. The match ends with the last safe cell. Walls as in free play.</string>
+    <string name="match_size">Board</string>
+    <string name="match_moves_per_turn">Moves per turn</string>
+    <plurals name="match_moves_desc">
+        <item quantity="one">%d move per turn</item>
+        <item quantity="other">%d moves per turn</item>
+    </plurals>
+    <string name="match_start">Play</string>
+
+    <string name="match_player">Player %1$d</string>
+    <string name="match_score_desc">Player %1$d, cells: %2$d</string>
+    <string name="match_score_turn_desc">Player %1$d, cells: %2$d, their turn now</string>
+    <string name="match_turn">Turn: player %1$d</string>
+    <string name="match_turn_moves">Turn: player %1$d · moves left: %2$d of %3$d</string>
+    <string name="match_hint_double_tap">Tap: reveal · double tap: mark a mine</string>
+    <string name="match_hint_long_press">Tap: reveal · hold: mark a mine</string>
+
+    <string name="match_handoff_title">Pass the phone</string>
+    <string name="match_handoff_tap">Tap to start the turn</string>
+
+    <string name="match_result_winner">Player %1$d wins!</string>
+    <string name="match_result_draw">Draw!</string>
+    <string name="match_result_subtitle">Cells each player took</string>
+    <string name="match_result_unowned_mines">Mines nobody found: %1$d. They belong to nobody.</string>
+
+    <string name="match_leave_title">Leave the match?</string>
+    <string name="match_leave_text">The score of this match will be lost.</string>
+    <string name="match_leave_confirm">Leave</string>
+    <string name="match_restart_title">Start over?</string>
+    <string name="match_restart_text">This territory match will be lost, and the players will start on a new board.</string>
+    <string name="match_restart_confirm">Start over</string>
+    <string name="match_keep_playing">Keep playing</string>
+
+    <string name="how_to_match_title">Two players</string>
+    <string name="how_to_match">In a territory match two players take turns on one phone. Cells you reveal and mines you mark correctly are yours. A safe cell marked as a mine and a mine that goes off go to your opponent. The match ends with the last safe cell, and mines nobody found belong to nobody. Whoever owns more cells wins.</string>
+</resources>

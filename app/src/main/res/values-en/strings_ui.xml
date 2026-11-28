@@ -119,7 +119,7 @@
     <string name="how_to_far_title">Far cell</string>
     <string name="how_to_far">A gold ring marks a far cell. Its number counts the mines up to two steps away, not just its neighbours. A wall blocks this view and a portal carries it across. Tap a revealed far cell and the ball highlights its range. If you turn on “Flag by long press” in the settings and the flags and exploded mines in the range already match the number, the tap reveals the rest of the range instead, if anything is left to reveal.</string>
     <string name="how_to_line_title">Line cell</string>
-    <string name="how_to_line">A turquoise number with an arrow counts the mines in a straight row of cells in the direction of the arrow, not its neighbours. The row ends at a wall, the coast, a pentagon or its length limit. A line cell at a passage sends its row through the passage into the next room, so it helps you get in.</string>
+    <string name="how_to_line">A turquoise number with an arrow counts the mines in a straight row of cells in the direction of the arrow, not its neighbours. The row ends at a wall, the coast, a pentagon or its length limit. A dimmed dash in place of the number means the row has no mines. A line cell at a passage sends its row through the passage into the next room, so it helps you get in.</string>
     <string name="how_to_portal_title">Portal</string>
     <string name="how_to_portal">Two distant cells with a mark in the same colour are neighbours of each other. The number of one counts the other, and a zero spreads through the pair. Portal cells never hold a mine.</string>
     <string name="how_to_lock_title">Padlock</string>
@@ -127,11 +127,13 @@
     <string name="how_to_island_title">Island and ocean</string>
     <string name="how_to_island">Part of the ball can be ocean with no cells. The land then splits into islands, joined only by portals.</string>
 
-    <string name="feature_card_new">New</string>
     <string name="feature_card_board">On this board</string>
     <string name="feature_card_counter">%1$d/%2$d</string>
     <string name="feature_card_counter_desc">Card %1$d of %2$d</string>
     <string name="feature_card_next">Next</string>
     <string name="feature_card_ok">OK</string>
     <string name="action_feature_help">Explain the cells of this board</string>
+
+    <string name="setting_random_walls">Walls and rooms in free play</string>
+    <string name="setting_random_walls_desc">Turn off to draw boards without walls and rooms. The campaign stays the same.</string>
 </resources>

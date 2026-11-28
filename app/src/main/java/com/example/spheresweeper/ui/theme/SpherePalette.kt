@@ -133,9 +133,36 @@ class SpherePalette(
     val win: IntArray,
     /** Explosion flash, at 0, 0.18, 0.45, 0.75 and 1. */
     val explosion: IntArray,
+    /**
+     * Territory match: the colour of the cells each player owns, by player index, used in place of the
+     * revealed colour (and of the covered colour under a found mine). The renderer shades it like a
+     * revealed cell, with the shade raised to at least [playerCellMinShade]. A theme picks them so that
+     * every number colour, [far] and [line] keep 4.5:1 or more against the shaded cell; the space theme
+     * notes where the brightest spot of its gloss, drawn over the digits, lowers that.
+     */
+    val playerCells: List<Rgb>,
+    /**
+     * Lowest shade of a player's cell. Light themes set 1: their dark digits leave no room for a tint at
+     * the dimmest revealed shade, so owned cells keep their full colour at every light and can carry a
+     * visible tint at the same contrast. 0 shades them exactly like revealed cells.
+     */
+    val playerCellMinShade: Float,
+    /**
+     * Territory match: pennant and pole of the flag on a found mine, which lies on a player's cell
+     * ([playerCells]). A theme picks them for 3.5:1 (pennant) and 4.5:1 (pole) or more against both
+     * players' cells, since its single-player [flag] and [pole] may not stand out on them.
+     */
+    val ownedFlag: Int,
+    val ownedPole: Int,
+    /**
+     * Territory match: the mine shown at the end of a match on a mine nobody found, over [lostMineCell];
+     * 3:1 or more against that cell.
+     */
+    val unownedMine: Int,
 ) {
     init {
         require(covered.size >= 2) { "at least two covered colours" }
+        require(playerCells.size >= 2) { "one cell colour per player" }
         require(numbers.size >= 2 && portals.isNotEmpty() && confetti.isNotEmpty())
         require(halo.size == 4 && pool.size == 2 && core.size == 3 && gloss.size == 3)
         require(win.size == 5 && explosion.size == 5)

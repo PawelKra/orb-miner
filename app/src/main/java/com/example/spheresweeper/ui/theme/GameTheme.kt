@@ -87,6 +87,12 @@ class UiPalette(
     val lines: Color,
     val portals: Color,
     val locks: Color,
+    /**
+     * Territory match: each player's colour for text and marks, by player index, in the hue of the
+     * player's cells on the ball ([SpherePalette.playerCells]). Text in it keeps 4.5:1 or more on the
+     * background and on [panel].
+     */
+    val players: List<Color>,
     /** Board-size badges in the free-play list, from the smallest to the largest board. */
     val boardAccents: List<Color>,
     val textPrimary: Color,

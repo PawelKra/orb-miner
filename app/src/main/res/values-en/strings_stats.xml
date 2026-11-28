@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stats_title">Statistics</string>
+    <string name="stats_card_subtitle">Wins, times and streaks in free play and the campaign</string>
+    <string name="stats_empty_title">No statistics yet</string>
+    <string name="stats_empty">Finish your first game, won or lost, and the statistics appear here. An abandoned game does not count.</string>
+    <string name="stats_section_empty">No finished games</string>
+    <string name="stats_games_wins">games: %1$d · wins: %2$d</string>
+    <string name="stats_win_rate">%1$d%%</string>
+    <string name="stats_win_rate_desc">Win rate: %1$d%%</string>
+    <string name="stats_average">Average winning time</string>
+    <string name="stats_streak">Current streak</string>
+    <string name="stats_best_streak">Best streak</string>
+    <string name="stats_no_value">–</string>
+</resources>
