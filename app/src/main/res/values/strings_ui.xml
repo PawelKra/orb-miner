@@ -48,6 +48,13 @@
     <string name="setting_long_press_desc">Przytrzymaj pole, aby postawić flagę. Stuknięcie odkrywa pole od razu.</string>
     <string name="setting_haptics">Wibracje</string>
     <string name="setting_haptics_desc">Przy flagach, akordach i wybuchu</string>
+    <string name="setting_theme">Motyw</string>
+    <string name="setting_theme_desc">Motyw %1$s</string>
+    <string name="theme_akwarela">Akwarela</string>
+    <string name="theme_szalwia">Szałwia</string>
+    <string name="theme_porcelana">Porcelana</string>
+    <string name="theme_zmierzch">Zmierzch</string>
+    <string name="theme_kosmos">Kosmos</string>
 
     <string name="hint_double_tap">Stuknij, aby odkryć · stuknij dwa razy, aby postawić flagę · przeciągnij, aby obrócić</string>
     <string name="hint_long_press">Stuknij, aby odkryć · przytrzymaj, aby postawić flagę · przeciągnij, aby obrócić</string>

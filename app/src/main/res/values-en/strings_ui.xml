@@ -38,6 +38,13 @@
     <string name="setting_long_press_desc">Hold a cell to place a flag. A tap reveals the cell immediately.</string>
     <string name="setting_haptics">Haptic feedback</string>
     <string name="setting_haptics_desc">On flags, chords and explosions</string>
+    <string name="setting_theme">Theme</string>
+    <string name="setting_theme_desc">%1$s theme</string>
+    <string name="theme_akwarela">Watercolour</string>
+    <string name="theme_szalwia">Sage</string>
+    <string name="theme_porcelana">Porcelain</string>
+    <string name="theme_zmierzch">Dusk</string>
+    <string name="theme_kosmos">Space</string>
 
     <string name="hint_double_tap">Tap to reveal · double tap to flag · drag to rotate</string>
     <string name="hint_long_press">Tap to reveal · hold to flag · drag to rotate</string>

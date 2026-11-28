@@ -16,6 +16,7 @@ import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.MathUtils
 import com.example.spheresweeper.math.Quaternion
+import com.example.spheresweeper.ui.theme.SpherePalette
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -29,7 +30,7 @@ import kotlin.random.Random
  * Draws the Goldberg sphere with its own perspective projection on a native canvas.
  *
  * Every cell is one flat-coloured polygon, lit as a whole (Lambert, specular and rim terms evaluated at
- * the cell centre) and outlined by a thin dark border. Digits, flags and mines are decals: they are drawn
+ * the cell centre) and outlined by a thin border. Digits, flags and mines are decals: they are drawn
  * in a local glyph space that a perspective matrix maps onto a square in the cell's tangent plane, so
  * they lie on the surface and rotate with the ball. Flags and mines keep a fixed frame on the ball.
  * Digits turn with the view: each frame their baseline snaps to the cell edge that is most horizontal
@@ -38,17 +39,24 @@ import kotlin.random.Random
  * points at the edge their row starts through; once revealed, a faint line runs through the row.
  * Walls are glowing lines along cell edges, drawn on top of the cells and the row lines.
  *
- * Ocean cells are dark water with a soft sheen and no border or decal. Both cells of a portal pair
+ * Ocean cells are water with a soft sheen and no border or decal. Both cells of a portal pair
  * carry the same mark in the pair's colour: a ring with a dot on a covered cell, a thin ring along the
  * edge on a revealed or flagged one so the number stays readable. A cell whose lock is still closed
  * shows a padlock with the number of cells left to reveal instead of its own number; once the lock
  * opens, the number shows with a small open padlock below it.
  *
- * Everything that depends only on the geometry (cell sizes, tangent frames, colours, glyph metrics,
- * confetti parameters, shaders, paints) is computed once in the constructor. [draw] works on
+ * All colours, the lighting and the backdrop shaders come from [palette]; digits use [typeface]. A
+ * renderer belongs to one geometry and one theme: a theme change creates a new renderer.
+ *
+ * Everything that depends only on the geometry and the theme (cell sizes, tangent frames, colours, glyph
+ * metrics, confetti parameters, shaders, paints) is computed once in the constructor. [draw] works on
  * preallocated objects only and does not allocate.
  */
-class SphereRenderer(private val geometry: SphereGeometry) {
+class SphereRenderer(
+    private val geometry: SphereGeometry,
+    private val palette: SpherePalette,
+    typeface: Typeface,
+) {
 
     private val cellCount = geometry.cellCount
     private val cornerStart = geometry.cornerStart
@@ -68,10 +76,25 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private val decalRight = FloatArray(cellCount * 3)
     private val decalUp = FloatArray(cellCount * 3)
 
-    // Covered-cell base colour per cell (teal -> blue -> violet by model latitude).
+    // Covered-cell base colour per cell (palette colours by model latitude).
     private val baseR = FloatArray(cellCount)
     private val baseG = FloatArray(cellCount)
     private val baseB = FloatArray(cellCount)
+
+    // Revealed-cell colour per cell before shading.
+    private val revealedR = FloatArray(cellCount)
+    private val revealedG = FloatArray(cellCount)
+    private val revealedB = FloatArray(cellCount)
+
+    // Ocean colour per cell before shading (south to north colour by model latitude).
+    private val oceanR = FloatArray(cellCount)
+    private val oceanG = FloatArray(cellCount)
+    private val oceanB = FloatArray(cellCount)
+
+    private val lighting = palette.lighting
+    private val numberColors = palette.numbers
+    private val portalColors = palette.portals
+    private val confettiColors = palette.confetti
 
     // Per-frame buffers.
     private val matrix = FloatArray(9)
@@ -141,12 +164,12 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
-        color = BORDER_COLOR
+        color = palette.border
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         style = Paint.Style.FILL
         textAlign = Paint.Align.LEFT
-        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+        this.typeface = typeface
     }
     private val wallGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -210,43 +233,37 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     // Unit-radius shaders, positioned and scaled through the canvas matrix.
     private val haloShader = RadialGradient(
         0f, 0f, 1f,
-        intArrayOf(argbLong(0x5545A0FF), argbLong(0x5545A0FF), argbLong(0x3045A0FF), argbLong(0x00203060)),
+        palette.halo,
         floatArrayOf(0f, 0.6f, 0.7f, 1f),
         Shader.TileMode.CLAMP,
     )
     private val poolShader = RadialGradient(
         0f, 0f, 1f,
-        intArrayOf(argbLong(0x663A6BFF), argbLong(0x00203080)),
+        palette.pool,
         floatArrayOf(0f, 1f),
         Shader.TileMode.CLAMP,
     )
     private val coreShader = RadialGradient(
         -0.35f, -0.4f, 1.5f,
-        intArrayOf(argbLong(0xFF1E2C66), argbLong(0xFF0B1030), argbLong(0xFF020308)),
+        palette.core,
         floatArrayOf(0f, 0.55f, 1f),
         Shader.TileMode.CLAMP,
     )
     private val glossShader = RadialGradient(
         -0.42f, -0.48f, 0.95f,
-        intArrayOf(argbLong(0x3CFFFFFF), argbLong(0x12FFFFFF), argbLong(0x00FFFFFF)),
+        palette.gloss,
         floatArrayOf(0f, 0.45f, 1f),
         Shader.TileMode.CLAMP,
     )
     private val winShader = RadialGradient(
         0f, 0f, 1f,
-        intArrayOf(
-            argbLong(0x00FFD166), argbLong(0x00FFD166), argbLong(0xB0FFD166),
-            argbLong(0x505CF2A8), argbLong(0x005CF2A8),
-        ),
+        palette.win,
         floatArrayOf(0f, 0.62f, 0.72f, 0.86f, 1f),
         Shader.TileMode.CLAMP,
     )
     private val explosionShader = RadialGradient(
         0f, 0f, 1f,
-        intArrayOf(
-            argbLong(0xFFFFFFFF), argbLong(0xFFFFE08A), argbLong(0xCCFF7A2E),
-            argbLong(0x66E0203A), argbLong(0x00E0203A),
-        ),
+        palette.explosion,
         floatArrayOf(0f, 0.18f, 0.45f, 0.75f, 1f),
         Shader.TileMode.CLAMP,
     )
@@ -299,7 +316,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             cellRadius[i] = if (end > start) sum / (end - start) else 0.1f
             inRadius[i] = if (minEdge < Float.MAX_VALUE) minEdge else cellRadius[i] * 0.86f
             buildTangentFrame(i, cx, cy, cz)
-            assignBaseColor(i, cy)
+            assignBaseColors(i, cy)
         }
 
         var radiusSum = 0f
@@ -344,7 +361,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             cfFlutter[p] = 4f + random.nextFloat() * 8f
             cfSize[p] = 0.6f + random.nextFloat() * 0.8f
             cfDelay[p] = random.nextFloat() * 0.25f
-            cfColor[p] = random.nextInt(CONFETTI_COLORS.size)
+            cfColor[p] = random.nextInt(confettiColors.size)
         }
     }
 
@@ -378,28 +395,48 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         decalRight[o + 2] = rz
     }
 
-    private fun assignBaseColor(cell: Int, latitudeY: Float) {
-        // Small deterministic per-cell variation gives the surface some texture.
+    /**
+     * Covered, revealed and ocean colours of [cell] before shading. The covered colour runs through the
+     * palette's colours from south to north, with a small deterministic per-cell variation that gives
+     * the surface some texture.
+     */
+    private fun assignBaseColors(cell: Int, latitudeY: Float) {
         val hash = (cell * -1640531535) ushr 24
         val jitter = (hash / 255f - 0.5f) * 0.08f
-        val t = MathUtils.clamp01((latitudeY + 1f) * 0.5f + jitter)
-        val r: Float
-        val g: Float
-        val b: Float
-        if (t < 0.5f) {
-            val u = t * 2f
-            r = MathUtils.lerp(TEAL_R, BLUE_R, u)
-            g = MathUtils.lerp(TEAL_G, BLUE_G, u)
-            b = MathUtils.lerp(TEAL_B, BLUE_B, u)
-        } else {
-            val u = (t - 0.5f) * 2f
-            r = MathUtils.lerp(BLUE_R, VIOLET_R, u)
-            g = MathUtils.lerp(BLUE_G, VIOLET_G, u)
-            b = MathUtils.lerp(BLUE_B, VIOLET_B, u)
-        }
+        val lat = (latitudeY + 1f) * 0.5f
+        val t = MathUtils.clamp01(lat + jitter)
+        val stops = palette.covered
+        val scaled = t * (stops.size - 1)
+        val k = min(stops.size - 2, scaled.toInt())
+        val u = scaled - k
+        val a = stops[k]
+        val b = stops[k + 1]
+        val r = MathUtils.lerp(a.r, b.r, u)
+        val g = MathUtils.lerp(a.g, b.g, u)
+        val bl = MathUtils.lerp(a.b, b.b, u)
         baseR[cell] = r
         baseG[cell] = g
-        baseB[cell] = b
+        baseB[cell] = bl
+
+        val revealed = palette.revealed
+        if (revealed == null) {
+            val gray = (r + g + bl) / 3f
+            val d = palette.revealedDesaturation
+            revealedR[cell] = MathUtils.lerp(r, gray, d)
+            revealedG[cell] = MathUtils.lerp(g, gray, d)
+            revealedB[cell] = MathUtils.lerp(bl, gray, d)
+        } else {
+            revealedR[cell] = revealed.r
+            revealedG[cell] = revealed.g
+            revealedB[cell] = revealed.b
+        }
+
+        val south = palette.oceanSouth
+        val north = palette.oceanNorth
+        val w = MathUtils.clamp01(lat)
+        oceanR[cell] = MathUtils.lerp(south.r, north.r, w)
+        oceanG[cell] = MathUtils.lerp(south.g, north.g, w)
+        oceanB[cell] = MathUtils.lerp(south.b, north.b, w)
     }
 
     /**
@@ -449,15 +486,29 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         orientation.toRotationMatrix(matrix)
         val visible = transformAndCull()
         sortBackToFront(visible)
-        for (k in 0 until visible) {
-            drawCell(canvas, order[k], board, status, layout)
+        if (palette.decalsOverGloss) {
+            // Cell fills, then the gloss, then everything drawn on the cells.
+            for (k in 0 until visible) {
+                drawCell(canvas, order[k], board, status, layout, fill = true, decals = false)
+            }
+            drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
+            for (k in 0 until visible) {
+                drawCell(canvas, order[k], board, status, layout, fill = false, decals = true)
+            }
+            if (layout != null) {
+                if (board != null) drawLineRows(canvas, layout, board)
+                drawWalls(canvas, layout)
+            }
+        } else {
+            for (k in 0 until visible) {
+                drawCell(canvas, order[k], board, status, layout, fill = true, decals = true)
+            }
+            if (layout != null) {
+                if (board != null) drawLineRows(canvas, layout, board)
+                drawWalls(canvas, layout)
+            }
+            drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
         }
-        if (layout != null) {
-            if (board != null) drawLineRows(canvas, layout, board)
-            drawWalls(canvas, layout)
-        }
-
-        drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
 
         if (blast && board != null && effectTime < EXPLOSION_SECONDS) {
             val cell = if (effect == SphereEffect.EXPLOSION) board.explodedCell else effectCell
@@ -725,8 +776,13 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
     // ------------------------------------------------------------------ cells
 
+    /**
+     * Draws [cell]: its fill when [fill] is true and the digits and icons on it when [decals] is true.
+     * The two parts can be drawn in separate passes so that the gloss lies between them.
+     */
     private fun drawCell(
         canvas: Canvas, cell: Int, board: MinesweeperBoard?, status: GameStatus, layout: BoardLayout?,
+        fill: Boolean, decals: Boolean,
     ) {
         val o = cell * 3
         val rx = rotated[o]
@@ -746,15 +802,15 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         spec *= spec
         val rimT = 1f - MathUtils.clamp01(fc)
         val rim = rimT * rimT * rimT
-        val light = AMBIENT + DIFFUSE * lambert
+        val light = lighting.ambient + lighting.diffuse * lambert
         val decalAlpha = MathUtils.smoothstep(DECAL_FADE_START, DECAL_FADE_END, fc)
 
         if (layout != null && !layout.isPresent(cell)) {
-            fillOcean(canvas, cell, projR, rx, ry, rz, light, spec, rim)
+            if (fill) fillOcean(canvas, cell, projR, rx, ry, rz, light, spec, rim)
             return
         }
         if (board == null) {
-            fillCovered(canvas, cell, projR, light, spec, rim)
+            if (fill) fillCovered(canvas, cell, projR, light, spec, rim)
             return
         }
 
@@ -765,29 +821,31 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val won = status == GameStatus.WON
 
         if (lost && cell == board.explodedCell) {
-            fillLit(canvas, projR, 0.95f, 0.13f, 0.16f, light, spec, 0.4f)
-            drawMineDecal(canvas, cell, decalAlpha, MINE_ON_RED_COLOR)
+            val c = palette.explodedCell
+            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.4f)
+            if (decals) drawMineDecal(canvas, cell, decalAlpha, palette.mineOnRed)
         } else if (board.isDetonated(cell)) {
             // A mine that cost a life earlier: darker red than the one that ended the game.
-            fillLit(canvas, projR, 0.62f, 0.10f, 0.14f, light, spec, 0.3f)
-            drawMineDecal(canvas, cell, decalAlpha, MINE_ON_RED_COLOR)
+            val c = palette.detonatedCell
+            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.3f)
+            if (decals) drawMineDecal(canvas, cell, decalAlpha, palette.mineOnRed)
         } else if (lost && mine && !flagged) {
-            fillLit(canvas, projR, 0.31f, 0.32f, 0.36f, light, spec, 0.25f)
-            drawMineDecal(canvas, cell, decalAlpha, MINE_COLOR)
+            val c = palette.lostMineCell
+            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.25f)
+            if (decals) drawMineDecal(canvas, cell, decalAlpha, palette.mine)
         } else if (revealed) {
-            val br = baseR[cell]
-            val bg = baseG[cell]
-            val bb = baseB[cell]
-            val gray = (br + bg + bb) / 3f
-            val shade = REVEALED_BASE + REVEALED_LIGHT * light
-            val sheen = spec * 0.15f
-            fillCell(
-                canvas, projR,
-                MathUtils.lerp(br, gray, DESATURATION) * shade + 0.03f + sheen,
-                MathUtils.lerp(bg, gray, DESATURATION) * shade + 0.035f + sheen,
-                MathUtils.lerp(bb, gray, DESATURATION) * shade + 0.05f + sheen,
-            )
-            if (!mine) {
+            if (fill) {
+                val shade = lighting.revealedFlat + lighting.revealedLit * light
+                val sheen = spec * lighting.revealedSheen
+                val lift = lighting.revealedLift
+                fillCell(
+                    canvas, projR,
+                    revealedR[cell] * shade + lift.r + sheen,
+                    revealedG[cell] * shade + lift.g + sheen,
+                    revealedB[cell] * shade + lift.b + sheen,
+                )
+            }
+            if (decals && !mine) {
                 val far = layout != null && layout.isFar(cell)
                 val line = layout != null && layout.isLine(cell)
                 // A closed lock hides the number; the far ring and the line arrow still show.
@@ -808,23 +866,26 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             }
         } else if (lost && flagged && board.isWrongFlag(cell)) {
             // A flag on a safe cell: muted red cell and a greyed-out flag.
-            fillLit(canvas, projR, 0.50f, 0.16f, 0.19f, light, spec, 0.25f)
-            drawFlagDecal(canvas, cell, decalAlpha, WRONG_POLE_COLOR, WRONG_FLAG_COLOR)
+            val c = palette.wrongFlagCell
+            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.25f)
+            if (decals) drawFlagDecal(canvas, cell, decalAlpha, palette.wrongPole, palette.wrongFlag)
         } else {
-            fillCovered(canvas, cell, projR, light, spec, rim)
-            if (flagged || (won && mine)) {
-                drawFlagDecal(canvas, cell, decalAlpha, POLE_COLOR, FLAG_COLOR)
-            } else if (!board.isLockOpen(cell)) {
-                drawLockDecal(canvas, cell, board, 1f, decalAlpha)
+            if (fill) fillCovered(canvas, cell, projR, light, spec, rim)
+            if (decals) {
+                if (flagged || (won && mine)) {
+                    drawFlagDecal(canvas, cell, decalAlpha, palette.pole, palette.flag)
+                } else if (!board.isLockOpen(cell)) {
+                    drawLockDecal(canvas, cell, board, 1f, decalAlpha)
+                }
             }
         }
-        if (layout != null && layout.isPortal(cell)) {
+        if (decals && layout != null && layout.isPortal(cell)) {
             drawPortalDecal(canvas, cell, layout.portalPair(cell), !revealed && !flagged, decalAlpha)
         }
     }
 
     /**
-     * Ocean cell: deep blue water lit like the ball, with a broad soft sheen and a small glint instead of
+     * Ocean cell: water lit like the ball, with a broad soft sheen and a small glint instead of
      * the gloss of covered cells. It has no border: the outline is stroked in the fill colour, as wide
      * as the border of land cells ([borderWidth]), so that neighbouring ocean cells merge without seams
      * and the coast leaves no gap next to the land border.
@@ -837,15 +898,18 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         sheen *= sheen
         sheen *= sheen
         sheen *= sheen
-        val gloss = sheen * OCEAN_SHEEN + spec * OCEAN_GLINT
+        val l = lighting
+        val gloss = sheen * l.oceanSheen + spec * l.oceanGlint
         // Slight per-cell change in depth, like the jitter of the land colours.
         val hash = (cell * -1640531535) ushr 24
-        val shade = light * (1f + (hash / 255f - 0.5f) * OCEAN_JITTER)
+        val shade = (l.oceanFlat + l.oceanLit * light) * (1f + (hash / 255f - 0.5f) * l.oceanJitter)
+        val tint = l.oceanGlossTint
+        val rimTint = l.oceanRim
         val color = MathUtils.argb(
             1f,
-            OCEAN_R * shade + gloss * 0.45f + rim * 0.04f,
-            OCEAN_G * shade + gloss * 0.7f + rim * 0.08f,
-            OCEAN_B * shade + gloss + rim * 0.2f,
+            oceanR[cell] * shade + gloss * tint.r + rim * rimTint.r,
+            oceanG[cell] * shade + gloss * tint.g + rim * rimTint.g,
+            oceanB[cell] * shade + gloss * tint.b + rim * rimTint.b,
         )
         fillPaint.color = color
         canvas.drawPath(path, fillPaint)
@@ -855,23 +919,30 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     }
 
     private fun fillCovered(canvas: Canvas, cell: Int, projR: Float, light: Float, spec: Float, rim: Float) {
+        val l = lighting
+        val shade = l.coveredFlat + l.coveredLit * light
+        val gloss = spec * l.coveredGloss
         fillCell(
             canvas, projR,
-            baseR[cell] * light + spec * COVERED_GLOSS + rim * 0.18f,
-            baseG[cell] * light + spec * COVERED_GLOSS + rim * 0.25f,
-            baseB[cell] * light + spec * COVERED_GLOSS + rim * 0.55f,
+            baseR[cell] * shade + gloss + rim * l.rim.r,
+            baseG[cell] * shade + gloss + rim * l.rim.g,
+            baseB[cell] * shade + gloss + rim * l.rim.b,
         )
     }
 
-    /** Fills [path] with colour (r, g, b) shaded by [light] plus a specular sheen of strength [gloss]. */
+    /**
+     * Fills [path] with colour (r, g, b) shaded like a covered cell under [light], plus a specular sheen
+     * of strength [gloss].
+     */
     private fun fillLit(
         canvas: Canvas, projR: Float, r: Float, g: Float, b: Float, light: Float, spec: Float, gloss: Float,
     ) {
+        val shade = lighting.coveredFlat + lighting.coveredLit * light
         val sheen = spec * gloss
-        fillCell(canvas, projR, r * light + sheen, g * light + sheen, b * light + sheen)
+        fillCell(canvas, projR, r * shade + sheen, g * shade + sheen, b * shade + sheen)
     }
 
-    /** One flat colour per cell, outlined with a thin dark border that separates touching cells. */
+    /** One flat colour per cell, outlined with a thin border that separates touching cells. */
     private fun fillCell(canvas: Canvas, projR: Float, r: Float, g: Float, b: Float) {
         fillPaint.color = MathUtils.argb(1f, r, g, b)
         canvas.drawPath(path, fillPaint)
@@ -891,20 +962,26 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val x = digitX[n]
         val y = digitY[n]
         val text = DIGITS[n]
-        textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
-        canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
-        textPaint.color = MathUtils.withAlpha(NUMBER_COLORS[min(n, NUMBER_COLORS.size - 1)], alpha)
+        drawDigitShadow(canvas, text, x, y, alpha)
+        textPaint.color = MathUtils.withAlpha(numberColors[min(n, numberColors.size - 1)], alpha)
         canvas.drawText(text, 0, text.length, x, y, textPaint)
         canvas.restore()
     }
 
-    /** Far cell: gold ring, and the gold number inside it when it is not zero. */
+    /** Soft shadow under a number at decal position (x, y); themes without a shadow skip it. */
+    private fun drawDigitShadow(canvas: Canvas, text: String, x: Float, y: Float, alpha: Float) {
+        if (palette.digitShadowAlpha <= 0f) return
+        textPaint.color = MathUtils.withAlpha(palette.digitShadow, alpha * palette.digitShadowAlpha)
+        canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
+    }
+
+    /** Far cell: ring in the far colour (gold), and the number inside it in the same colour when it is not zero. */
     private fun drawFarDecal(canvas: Canvas, cell: Int, n: Int, alpha: Float) {
         if (alpha < MIN_DECAL_ALPHA || !setupAlignedDecal(cell)) return
         canvas.save()
         canvas.concat(decalMatrix)
         ringPaint.strokeWidth = FAR_RING_STROKE
-        ringPaint.color = MathUtils.withAlpha(FAR_COLOR, alpha * FAR_RING_ALPHA)
+        ringPaint.color = MathUtils.withAlpha(palette.far, alpha * FAR_RING_ALPHA)
         canvas.drawCircle(0f, 0f, FAR_RING_RADIUS, ringPaint)
         if (n in 1..MAX_NUMBER) {
             val s = farScale[n]
@@ -912,16 +989,15 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             val text = DIGITS[n]
             val x = digitX[n]
             val y = digitY[n]
-            textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
-            canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
-            textPaint.color = MathUtils.withAlpha(FAR_COLOR, alpha)
+            drawDigitShadow(canvas, text, x, y, alpha)
+            textPaint.color = MathUtils.withAlpha(palette.far, alpha)
             canvas.drawText(text, 0, text.length, x, y, textPaint)
         }
         canvas.restore()
     }
 
     /**
-     * Line cell: turquoise number, scaled to stay clear of the arrow, and an arrow at the edge [side]
+     * Line cell: number in the line colour (turquoise), scaled to stay clear of the arrow, and an arrow at the edge [side]
      * the counted row starts through. A zero shows the arrow alone.
      */
     private fun drawLineDecal(canvas: Canvas, cell: Int, n: Int, side: Int, alpha: Float) {
@@ -934,20 +1010,19 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             val text = DIGITS[n]
             val x = digitX[n]
             val y = digitY[n]
-            textPaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
-            canvas.drawText(text, 0, text.length, x + DIGIT_SHADOW_OFFSET, y + DIGIT_SHADOW_OFFSET, textPaint)
-            textPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+            drawDigitShadow(canvas, text, x, y, alpha)
+            textPaint.color = MathUtils.withAlpha(palette.line, alpha)
             canvas.drawText(text, 0, text.length, x, y, textPaint)
             canvas.restore()
         }
         if (!setupEdgeDecal(cell, side)) return
         canvas.save()
         canvas.concat(decalMatrix)
-        // A dark outline keeps the arrow readable on light and dark cells alike.
+        // An outline keeps the arrow readable on light and dark cells alike.
         arrowOutlinePaint.strokeWidth = LINE_ARROW_OUTLINE
-        arrowOutlinePaint.color = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+        arrowOutlinePaint.color = decalOutline(alpha)
         canvas.drawPath(arrowPath, arrowOutlinePaint)
-        iconPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+        iconPaint.color = MathUtils.withAlpha(palette.line, alpha)
         canvas.drawPath(arrowPath, iconPaint)
         canvas.restore()
     }
@@ -962,8 +1037,8 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         canvas.save()
         canvas.concat(decalMatrix)
         if (scale != 1f) canvas.scale(scale, scale)
-        // A dark outline keeps the padlock readable on covered and revealed cells alike.
-        val outline = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+        // An outline keeps the padlock readable on covered and revealed cells alike.
+        val outline = decalOutline(alpha)
         iconStroke.color = outline
         iconStroke.strokeWidth = LOCK_SHACKLE_STROKE + LOCK_OUTLINE
         canvas.drawPath(shacklePath, iconStroke)
@@ -973,10 +1048,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             -LOCK_BODY_HALF_WIDTH, LOCK_BODY_TOP, LOCK_BODY_HALF_WIDTH, LOCK_BODY_BOTTOM,
             LOCK_BODY_CORNER, LOCK_BODY_CORNER, arrowOutlinePaint,
         )
-        iconStroke.color = MathUtils.withAlpha(LOCK_COLOR, alpha)
+        iconStroke.color = MathUtils.withAlpha(palette.lock, alpha)
         iconStroke.strokeWidth = LOCK_SHACKLE_STROKE
         canvas.drawPath(shacklePath, iconStroke)
-        iconPaint.color = MathUtils.withAlpha(LOCK_COLOR, alpha)
+        iconPaint.color = MathUtils.withAlpha(palette.lock, alpha)
         canvas.drawRoundRect(
             -LOCK_BODY_HALF_WIDTH, LOCK_BODY_TOP, LOCK_BODY_HALF_WIDTH, LOCK_BODY_BOTTOM,
             LOCK_BODY_CORNER, LOCK_BODY_CORNER, iconPaint,
@@ -985,7 +1060,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val s = lockTextScale[left]
         canvas.scale(s, s)
         val text = lockText[left]
-        textPaint.color = MathUtils.withAlpha(LOCK_TEXT_COLOR, alpha)
+        textPaint.color = MathUtils.withAlpha(palette.lockText, alpha)
         canvas.drawText(text, 0, text.length, lockTextX[left], lockTextY[left], textPaint)
         canvas.restore()
     }
@@ -995,7 +1070,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         if (alpha < MIN_DECAL_ALPHA || !setupAlignedDecal(cell)) return
         canvas.save()
         canvas.concat(decalMatrix)
-        val color = MathUtils.withAlpha(LOCK_COLOR, alpha * OPEN_LOCK_ALPHA)
+        val color = MathUtils.withAlpha(palette.lock, alpha * OPEN_LOCK_ALPHA)
         iconStroke.color = color
         iconStroke.strokeWidth = OPEN_SHACKLE_STROKE
         canvas.drawPath(openShacklePath, iconStroke)
@@ -1015,8 +1090,8 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         if (pair < 0 || alpha < MIN_DECAL_ALPHA || !setupDecal(cell)) return
         canvas.save()
         canvas.concat(decalMatrix)
-        val color = PORTAL_COLORS[pair % PORTAL_COLORS.size]
-        val outline = MathUtils.withAlpha(DIGIT_SHADOW_COLOR, alpha * DIGIT_SHADOW_ALPHA)
+        val color = portalColors[pair % portalColors.size]
+        val outline = decalOutline(alpha)
         if (full) {
             iconPaint.color = MathUtils.withAlpha(color, alpha * PORTAL_FILL_ALPHA)
             canvas.drawCircle(0f, 0f, PORTAL_RING_RADIUS, iconPaint)
@@ -1029,7 +1104,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             iconPaint.color = outline
             canvas.drawCircle(0f, 0f, PORTAL_DOT_RADIUS + PORTAL_OUTLINE * 0.5f, iconPaint)
             // Pairs beyond the palette repeat its colours with a hollow dot.
-            if ((pair / PORTAL_COLORS.size) % 2 == 0) {
+            if ((pair / portalColors.size) % 2 == 0) {
                 iconPaint.color = MathUtils.withAlpha(color, alpha)
                 canvas.drawCircle(0f, 0f, PORTAL_DOT_RADIUS, iconPaint)
             } else {
@@ -1043,6 +1118,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         }
         canvas.restore()
     }
+
+    /** Outline colour of arrows, padlocks and portal marks at decal [alpha]. */
+    private fun decalOutline(alpha: Float): Int =
+        MathUtils.withAlpha(palette.decalOutline, alpha * palette.decalOutlineAlpha)
 
     // ------------------------------------------------------------------ line rows
 
@@ -1089,7 +1168,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val sa = frameFocal / (d - az)
         val sb = frameFocal / (d - bz)
         rowPaint.strokeWidth = rowWidth * (sa + sb) * 0.5f
-        rowPaint.color = MathUtils.withAlpha(LINE_COLOR, alpha)
+        rowPaint.color = MathUtils.withAlpha(palette.line, alpha)
         canvas.drawLine(frameCx + ax * sa, frameCy - ay * sa, frameCx + bx * sb, frameCy - by * sb, rowPaint)
     }
 
@@ -1128,10 +1207,10 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         val y1 = frameCy - by * sb
         val width = wallWidth * (sa + sb) * 0.5f
         wallGlowPaint.strokeWidth = width * WALL_GLOW_FACTOR
-        wallGlowPaint.color = MathUtils.withAlpha(WALL_GLOW_COLOR, alpha * WALL_GLOW_ALPHA)
+        wallGlowPaint.color = MathUtils.withAlpha(palette.wallGlow, alpha * WALL_GLOW_ALPHA)
         canvas.drawLine(x0, y0, x1, y1, wallGlowPaint)
         wallCorePaint.strokeWidth = width
-        wallCorePaint.color = MathUtils.withAlpha(WALL_CORE_COLOR, alpha)
+        wallCorePaint.color = MathUtils.withAlpha(palette.wallCore, alpha)
         canvas.drawLine(x0, y0, x1, y1, wallCorePaint)
     }
 
@@ -1161,7 +1240,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         }
         iconPaint.color = MathUtils.withAlpha(color, alpha)
         canvas.drawCircle(0f, 0f, MINE_BODY_RADIUS, iconPaint)
-        iconPaint.color = MathUtils.withAlpha(MINE_HIGHLIGHT_COLOR, alpha)
+        iconPaint.color = MathUtils.withAlpha(palette.mineHighlight, alpha)
         canvas.drawCircle(-MINE_BODY_RADIUS * 0.36f, -MINE_BODY_RADIUS * 0.36f, MINE_BODY_RADIUS * 0.22f, iconPaint)
         canvas.restore()
     }
@@ -1202,7 +1281,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
     private fun drawExplosion(canvas: Canvas, cell: Int, radius: Float, t: Float) {
         // Red screen tint right after the hit.
         if (t < FLASH_TINT_SECONDS) {
-            canvas.drawColor(MathUtils.withAlpha(TINT_COLOR, 0.3f * (1f - t / FLASH_TINT_SECONDS)))
+            canvas.drawColor(MathUtils.withAlpha(palette.tint, 0.3f * (1f - t / FLASH_TINT_SECONDS)))
         }
         if (cell < 0 || cell >= cellCount) return
         val o = cell * 3
@@ -1228,7 +1307,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             val p = (t / HINT_SECONDS - ring * 0.25f) / 0.75f
             if (p <= 0f || p >= 1f) continue
             val fade = 1f - p
-            ringPaint.color = MathUtils.withAlpha(HINT_COLOR, fade * fade)
+            ringPaint.color = MathUtils.withAlpha(palette.hint, fade * fade)
             canvas.drawCircle(x, y, base * (0.8f + 1.6f * MathUtils.easeOutCubic(p)), ringPaint)
         }
     }
@@ -1243,7 +1322,7 @@ class SphereRenderer(private val geometry: SphereGeometry) {
             val x = cx + cfDirX[p] * travel
             val y = cy + cfDirY[p] * travel + radius * 0.35f * tt * tt
             val size = radius * 0.03f * cfSize[p]
-            confettiPaint.color = MathUtils.withAlpha(CONFETTI_COLORS[cfColor[p]], fadeOut)
+            confettiPaint.color = MathUtils.withAlpha(confettiColors[cfColor[p]], fadeOut)
             canvas.save()
             canvas.translate(x, y)
             canvas.rotate(cfSpin[p] * tt * 360f)
@@ -1255,17 +1334,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
     companion object {
         private const val CULL_EPSILON = 0.01f
-        private const val DESATURATION = 0.62f
-
-        /** Strength of the specular highlight on covered cells; higher values wash the cells out to white. */
-        private const val COVERED_GLOSS = 0.42f
-        private const val AMBIENT = 0.30f
-        private const val DIFFUSE = 0.75f
-
-        /** Revealed cells: shade = REVEALED_BASE + REVEALED_LIGHT * light, much darker than covered ones. */
-        private const val REVEALED_BASE = 0.08f
-        private const val REVEALED_LIGHT = 0.25f
-
         // Cell border width in pixels: proportional to the projected cell size, kept thin.
         private const val BORDER_MIN = 1f
         private const val BORDER_MAX = 2.6f
@@ -1344,14 +1412,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private const val PORTAL_EDGE_STROKE = 8f
         private const val PORTAL_EDGE_ALPHA = 0.9f
 
-        // Ocean: deep blue base, broad soft sheen, small glint and a slight per-cell change in depth.
-        private const val OCEAN_R = 0.03f
-        private const val OCEAN_G = 0.1f
-        private const val OCEAN_B = 0.3f
-        private const val OCEAN_SHEEN = 0.2f
-        private const val OCEAN_GLINT = 0.18f
-        private const val OCEAN_JITTER = 0.25f
-
         // Row lines: thin and translucent, width relative to the mean cell radius.
         private const val ROW_WIDTH_PER_RADIUS = 0.045f
         private const val ROW_ALPHA = 0.4f
@@ -1364,7 +1424,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         /** A digit switches to another edge only when that edge is this much flatter (|sin|, about 5 degrees). */
         private const val EDGE_HYSTERESIS = 0.09f
         private const val DIGIT_SHADOW_OFFSET = 4f
-        private const val DIGIT_SHADOW_ALPHA = 0.45f
 
         // Flag geometry in decal units (about 55 % of the cell's height).
         private const val FLAG_STROKE = 9f
@@ -1390,17 +1449,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
         private const val CONFETTI_COUNT = 120
         private const val CONFETTI_SEED = 20240611
-
-        // Palette endpoints for covered cells.
-        private const val TEAL_R = 0.05f
-        private const val TEAL_G = 0.82f
-        private const val TEAL_B = 0.78f
-        private const val BLUE_R = 0.16f
-        private const val BLUE_G = 0.46f
-        private const val BLUE_B = 1.00f
-        private const val VIOLET_R = 0.64f
-        private const val VIOLET_G = 0.30f
-        private const val VIOLET_B = 1.00f
 
         // Light from the upper left front, and the Blinn half vector with the view direction (0, 0, 1).
         private val LIGHT_X: Float
@@ -1429,59 +1477,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
 
         private val DIGITS = Array(MAX_NUMBER + 1) { it.toString() }
 
-        /** Index = number of adjacent mines (index 0 unused). */
-        private val NUMBER_COLORS = intArrayOf(
-            argbLong(0xFFFFFFFF),
-            argbLong(0xFF5AA8FF), // 1 blue
-            argbLong(0xFF5ED66E), // 2 green
-            argbLong(0xFFFF5A5A), // 3 red
-            argbLong(0xFFB98CFF), // 4 violet
-            argbLong(0xFFFF9F45), // 5 orange
-            argbLong(0xFF3ED8D8), // 6 cyan
-            argbLong(0xFFE6E8EE), // 7 light grey
-            argbLong(0xFFFF80C8), // 8 pink
-        )
-
-        private val FLAG_COLOR = argbLong(0xFFFF4A57)
-        private val POLE_COLOR = argbLong(0xFFF2F4F8)
-        private val WRONG_FLAG_COLOR = argbLong(0xFF9A9CA3)
-        private val WRONG_POLE_COLOR = argbLong(0xFF7D8089)
-        private val MINE_COLOR = argbLong(0xFF0D0F16)
-        private val MINE_ON_RED_COLOR = argbLong(0xFF1A0508)
-        private val MINE_HIGHLIGHT_COLOR = argbLong(0x8CC8CCD6)
-        private val BORDER_COLOR = argbLong(0xF00A0C12)
-        private val DIGIT_SHADOW_COLOR = argbLong(0xFF000000)
-        private val TINT_COLOR = argbLong(0xFFFF2040)
-        private val FAR_COLOR = argbLong(0xFFFFD166)
-        private val LINE_COLOR = argbLong(0xFF7DF9E1)
-        private val WALL_CORE_COLOR = argbLong(0xFFFFF3D6)
-        private val WALL_GLOW_COLOR = argbLong(0xFFFF9A3C)
-        private val HINT_COLOR = argbLong(0xFF4FE3FF)
-        private val LOCK_COLOR = argbLong(0xFFC6F25A)
-        private val LOCK_TEXT_COLOR = argbLong(0xFF16200A)
-
-        /**
-         * Portal pair colours, indexed by pair: clearly apart from each other and from the gold of far
-         * cells, the turquoise of line cells, the orange of walls and the lime of locks.
-         */
-        private val PORTAL_COLORS = intArrayOf(
-            argbLong(0xFFFF5CD8), // magenta
-            argbLong(0xFF4FA3FF), // azure
-            argbLong(0xFFF4F6FF), // white
-            argbLong(0xFF9B7BFF), // violet
-            argbLong(0xFF4CEB7E), // green
-            argbLong(0xFFFF5C6E), // rose red
-        )
-
-        private val CONFETTI_COLORS = intArrayOf(
-            argbLong(0xFFFFD166),
-            argbLong(0xFF5CF2A8),
-            argbLong(0xFF4FE3FF),
-            argbLong(0xFFA77BFF),
-            argbLong(0xFFFF7AD9),
-            argbLong(0xFFFF6B6B),
-        )
-
         private const val SPIKES = 8
         private val SPIKE_COS = FloatArray(SPIKES) { cos(it * PI / 4.0).toFloat() }
         private val SPIKE_SIN = FloatArray(SPIKES) { sin(it * PI / 4.0).toFloat() }
@@ -1489,8 +1484,6 @@ class SphereRenderer(private val geometry: SphereGeometry) {
         private val EXPLOSION_NANOS = (EXPLOSION_SECONDS * 1e9f).toLong()
         private val WIN_NANOS = (WIN_SECONDS * 1e9f).toLong()
         private val HINT_NANOS = (HINT_SECONDS * 1e9f).toLong()
-
-        private fun argbLong(value: Long): Int = value.toInt()
 
         /** How long [effect] needs frame ticks, in nanoseconds. */
         fun effectDurationNanos(effect: SphereEffect): Long = when (effect) {

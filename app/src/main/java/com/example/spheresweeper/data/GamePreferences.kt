@@ -19,6 +19,11 @@ class GamePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_HAPTICS, true)
         set(value) = prefs.edit { putBoolean(KEY_HAPTICS, value) }
 
+    /** Identifier of the chosen theme, or null before the first choice. */
+    var themeId: String?
+        get() = prefs.getString(KEY_THEME, null)
+        set(value) = prefs.edit { putString(KEY_THEME, value) }
+
     /** Campaign progress in the text form of [com.example.spheresweeper.logic.CampaignProgress.serialize]. */
     var campaignProgress: String?
         get() = prefs.getString(KEY_CAMPAIGN_PROGRESS, null)
@@ -52,6 +57,7 @@ class GamePreferences(context: Context) {
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_BEST_PREFIX = "best_time_"
         const val KEY_CAMPAIGN_PROGRESS = "campaign_progress"
+        const val KEY_THEME = "theme"
         const val NO_TIME = -1L
     }
 }

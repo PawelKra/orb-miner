@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
@@ -56,7 +57,8 @@ import com.example.spheresweeper.logic.LevelSpec
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.RecordResult
 import com.example.spheresweeper.logic.SphereGeometry
-import com.example.spheresweeper.ui.theme.SpaceColors
+import com.example.spheresweeper.ui.theme.LocalGameTheme
+import com.example.spheresweeper.ui.theme.themeColors
 import kotlinx.coroutines.delay
 
 @Composable
@@ -69,12 +71,13 @@ fun GameScreen(vm: GameViewModel) {
     val finished = status == GameStatus.WON || status == GameStatus.LOST
     val config = vm.config
     val level = (config as? GameConfig.Level)?.spec
+    val colors = themeColors
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
         val viewInsets = rememberBallInsets(landscape, withLevelLabel = level != null)
 
-        SpaceBackground()
+        ThemeBackground()
 
         if (geometry != null && board != null) {
             SphereView(
@@ -88,7 +91,7 @@ fun GameScreen(vm: GameViewModel) {
             Text(
                 text = stringResource(R.string.loading),
                 style = MaterialTheme.typography.titleMedium,
-                color = SpaceColors.TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -127,7 +130,7 @@ fun GameScreen(vm: GameViewModel) {
                     Text(
                         text = levelLabel(level),
                         style = MaterialTheme.typography.titleSmall,
-                        color = branchAccent(level.branch),
+                        color = branchTextColor(level.branch, colors),
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(LEVEL_LABEL_GAP))
@@ -135,7 +138,7 @@ fun GameScreen(vm: GameViewModel) {
                 Text(
                     text = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap),
                     style = MaterialTheme.typography.bodySmall,
-                    color = SpaceColors.TextSecondary,
+                    color = colors.textSecondary,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -253,7 +256,11 @@ private fun SphereView(
     viewInsets: ViewInsets,
     modifier: Modifier = Modifier,
 ) {
-    val renderer = remember(geometry) { SphereRenderer(geometry) }
+    val theme = LocalGameTheme.current
+    val context = LocalContext.current
+    val renderer = remember(geometry, theme) {
+        SphereRenderer(geometry, theme.sphere, theme.font.canvasTypeface(context))
+    }
     val haptics = rememberHaptics(vm.hapticsEnabled)
     val scope = rememberCoroutineScope()
     val controller = remember(vm, geometry) { SphereInputController(vm, geometry, scope) }
@@ -307,7 +314,7 @@ private fun LivesPill(lives: Int, modifier: Modifier = Modifier) {
     StatPill(
         value = lives.toString(),
         contentDescription = stringResource(R.string.hud_lives_remaining, lives),
-        accent = SpaceColors.Heart,
+        accent = themeColors.heart,
         modifier = modifier,
         icon = { drawHeartIcon(it) },
     )
@@ -320,7 +327,7 @@ private fun HintPill(vm: GameViewModel) {
     StatPill(
         value = hints.toString(),
         contentDescription = stringResource(R.string.action_hint, hints),
-        accent = SpaceColors.Cyan,
+        accent = themeColors.primary,
         onClick = { haptics.perform(vm.useHint()) },
         enabled = hints > 0 && vm.status == GameStatus.PLAYING,
         icon = { drawBulbIcon(it) },
@@ -335,12 +342,13 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
     val timeDescription = stringResource(R.string.hud_time, timeText)
     val menuDescription = stringResource(if (vm.config is GameConfig.Level) R.string.action_map else R.string.action_menu)
     val restartDescription = stringResource(R.string.action_restart)
+    val colors = themeColors
 
     val menuButton: @Composable () -> Unit = {
         GlowIconButton(
             onClick = { vm.exitGame() },
             contentDescription = menuDescription,
-            accent = SpaceColors.Violet,
+            accent = colors.secondary,
             icon = { drawMenuIcon(it) },
         )
     }
@@ -348,7 +356,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
         GlowIconButton(
             onClick = { vm.restart() },
             contentDescription = restartDescription,
-            accent = SpaceColors.Cyan,
+            accent = colors.primary,
             icon = { drawRestartIcon(it) },
         )
     }
@@ -356,7 +364,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
         StatPill(
             value = mines.toString(),
             contentDescription = minesDescription,
-            accent = SpaceColors.Danger,
+            accent = colors.danger,
             icon = { drawMineIcon(it) },
         )
     }
@@ -364,7 +372,7 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
         StatPill(
             value = timeText,
             contentDescription = timeDescription,
-            accent = SpaceColors.Gold,
+            accent = colors.gold,
             icon = { drawClockIcon(it) },
         )
     }
@@ -424,14 +432,15 @@ private fun ResultCard(
     onPlayAgain: () -> Unit,
     onMenu: () -> Unit,
 ) {
-    val accent = if (won) SpaceColors.Success else SpaceColors.Danger
+    val colors = themeColors
+    val accent = if (won) colors.success else colors.danger
     val shape = RoundedCornerShape(if (compact) 20.dp else 24.dp)
     Column(
         modifier = Modifier
             .widthIn(max = if (compact) 272.dp else 420.dp)
             .fillMaxWidth()
             .clip(shape)
-            .background(SpaceColors.Panel.copy(alpha = 0.9f))
+            .background(colors.panel.copy(alpha = 0.9f))
             .border(1.dp, accent.copy(alpha = 0.6f), shape)
             .padding(if (compact) 14.dp else 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -445,26 +454,26 @@ private fun ResultCard(
         Text(
             text = stringResource(if (won) R.string.result_won_subtitle else R.string.result_lost_subtitle),
             style = MaterialTheme.typography.bodyMedium,
-            color = SpaceColors.TextSecondary,
+            color = colors.textSecondary,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(10.dp))
         Text(
             text = stringResource(R.string.result_time, formatDuration(timeMillis)),
             style = MaterialTheme.typography.titleMedium,
-            color = SpaceColors.TextPrimary,
+            color = colors.textPrimary,
         )
         if (won && newBest) {
             Text(
                 text = stringResource(R.string.result_new_best),
                 style = MaterialTheme.typography.titleMedium,
-                color = SpaceColors.Gold,
+                color = colors.gold,
             )
         } else if (bestMillis != null) {
             Text(
                 text = stringResource(R.string.best_time, formatDuration(bestMillis)),
                 style = MaterialTheme.typography.bodyMedium,
-                color = SpaceColors.TextSecondary,
+                color = colors.textSecondary,
             )
         }
         Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
@@ -482,7 +491,7 @@ private fun ResultCard(
                 onClick = onMenu,
                 modifier = Modifier.weight(1f),
                 primary = false,
-                accent = SpaceColors.Violet,
+                accent = colors.secondary,
             )
         }
     }
@@ -504,7 +513,8 @@ private fun LevelResultCard(
     onPlayAgain: () -> Unit,
     onMap: () -> Unit,
 ) {
-    val accent = if (won) SpaceColors.Success else SpaceColors.Danger
+    val colors = themeColors
+    val accent = if (won) colors.success else colors.danger
     val shape = RoundedCornerShape(if (compact) 20.dp else 24.dp)
     val earned = record?.earned ?: 0
     val best = record?.best ?: earned
@@ -516,7 +526,7 @@ private fun LevelResultCard(
             .widthIn(max = if (compact) 272.dp else 420.dp)
             .fillMaxWidth()
             .clip(shape)
-            .background(SpaceColors.Panel.copy(alpha = 0.9f))
+            .background(colors.panel.copy(alpha = 0.9f))
             .border(1.dp, accent.copy(alpha = 0.6f), shape)
             .padding(if (compact) 14.dp else 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -529,7 +539,7 @@ private fun LevelResultCard(
         Text(
             text = levelLabel(level),
             style = MaterialTheme.typography.bodyMedium,
-            color = branchAccent(level.branch),
+            color = branchTextColor(level.branch, colors),
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(if (compact) 8.dp else 12.dp))
@@ -543,7 +553,7 @@ private fun LevelResultCard(
             Text(
                 text = stringResource(R.string.result_new_star_record),
                 style = MaterialTheme.typography.titleMedium,
-                color = SpaceColors.Gold,
+                color = colors.gold,
             )
         } else if (best > earned) {
             Spacer(Modifier.height(4.dp))
@@ -555,7 +565,7 @@ private fun LevelResultCard(
                 Text(
                     text = stringResource(R.string.result_best_stars),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = SpaceColors.TextSecondary,
+                    color = colors.textSecondary,
                 )
                 Spacer(Modifier.width(6.dp))
                 StarRow(stars = best, starSize = 14.dp)
@@ -565,7 +575,7 @@ private fun LevelResultCard(
         Text(
             text = stringResource(R.string.result_time, formatDuration(timeMillis)),
             style = MaterialTheme.typography.bodyMedium,
-            color = SpaceColors.TextSecondary,
+            color = colors.textSecondary,
         )
         Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
         if (won && hasNext) {
@@ -592,7 +602,7 @@ private fun LevelResultCard(
                 onClick = onMap,
                 modifier = Modifier.weight(1f),
                 primary = won && !hasNext,
-                accent = SpaceColors.Violet,
+                accent = colors.secondary,
             )
         }
     }

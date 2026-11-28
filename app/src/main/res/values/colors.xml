@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="space_background">#FF05060F</color>
+    <!--
+        Window colours before the first frame, one per theme: the colour MainActivity gives the window
+        for that theme (UiPalette.windowBackground).
+    -->
+    <color name="window_akwarela">#FFD2DAE2</color>
+    <color name="window_szalwia">#FFD8DDD5</color>
+    <color name="window_porcelana">#FFDCE2EA</color>
+    <color name="window_zmierzch">#FF25232E</color>
+    <color name="window_kosmos">#FF05060F</color>
+
+    <!--
+        Window colour of the manifest theme. It cannot know the stored theme, so it uses the default
+        theme's colour; values-night replaces it with a dark one.
+    -->
+    <color name="window_background">@color/window_akwarela</color>
 </resources>

@@ -58,17 +58,16 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.spheresweeper.R
 import com.example.spheresweeper.logic.Branch
 import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.LevelSpec
-import com.example.spheresweeper.ui.theme.SpaceColors
+import com.example.spheresweeper.ui.theme.UiPalette
+import com.example.spheresweeper.ui.theme.numberTextStyle
+import com.example.spheresweeper.ui.theme.themeColors
 import kotlin.math.roundToInt
 
 /**
@@ -100,7 +99,7 @@ fun CampaignScreen(vm: GameViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val twoColumns = maxWidth >= TWO_COLUMN_MIN_WIDTH
-        SpaceBackground()
+        ThemeBackground()
 
         Column(
             Modifier
@@ -174,15 +173,30 @@ fun CampaignScreen(vm: GameViewModel) {
 }
 
 /** Accent colour of a branch; the feature branches use the colour the ball draws that feature in. */
-internal fun branchAccent(branch: Branch): Color = when (branch) {
-    Branch.TRUNK -> SpaceColors.Cyan
-    Branch.WALLS -> Color(0xFFFF9A3C)
-    Branch.FAR -> SpaceColors.Gold
-    Branch.LINES -> Color(0xFF7DF9E1)
-    Branch.MIXED -> SpaceColors.Violet
-    Branch.PORTALS -> Color(0xFFFF5CD8)
-    Branch.LOCKS -> Color(0xFFC6F25A)
-    Branch.ISLANDS -> SpaceColors.Blue
+internal fun branchAccent(branch: Branch, colors: UiPalette): Color = when (branch) {
+    Branch.TRUNK -> colors.primary
+    Branch.WALLS -> colors.walls
+    Branch.FAR -> colors.gold
+    Branch.LINES -> colors.lines
+    Branch.MIXED -> colors.secondary
+    Branch.PORTALS -> colors.portals
+    Branch.LOCKS -> colors.locks
+    Branch.ISLANDS -> colors.blue
+}
+
+/** Colour of text in a branch colour: the theme's darker text shade, or the accent itself. */
+internal fun branchTextColor(branch: Branch, colors: UiPalette): Color {
+    val text = colors.branchText ?: return branchAccent(branch, colors)
+    return when (branch) {
+        Branch.TRUNK -> text.trunk
+        Branch.WALLS -> text.walls
+        Branch.FAR -> text.far
+        Branch.LINES -> text.lines
+        Branch.MIXED -> text.mixed
+        Branch.PORTALS -> text.portals
+        Branch.LOCKS -> text.locks
+        Branch.ISLANDS -> text.islands
+    }
 }
 
 internal fun branchNameRes(branch: Branch): Int = when (branch) {
@@ -202,13 +216,14 @@ internal fun StarRow(
     stars: Int,
     starSize: Dp,
     modifier: Modifier = Modifier,
-    emptyColor: Color = SpaceColors.TextMuted,
+    emptyColor: Color = themeColors.textMuted,
 ) {
+    val filledColor = themeColors.gold
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(starSize * 0.15f)) {
         for (k in 0 until CampaignProgress.MAX_STARS) {
             val filled = k < stars
             Canvas(Modifier.size(starSize)) {
-                drawStarIcon(if (filled) SpaceColors.Gold else emptyColor, filled)
+                drawStarIcon(if (filled) filledColor else emptyColor, filled)
             }
         }
     }
@@ -246,6 +261,7 @@ private class ScrollAnchor {
 @Composable
 private fun CampaignTopBar(totalStars: Int, onBack: () -> Unit) {
     val maxStars = Campaign.all.size * CampaignProgress.MAX_STARS
+    val colors = themeColors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -255,14 +271,14 @@ private fun CampaignTopBar(totalStars: Int, onBack: () -> Unit) {
         GlowIconButton(
             onClick = onBack,
             contentDescription = stringResource(R.string.action_back),
-            accent = SpaceColors.Violet,
+            accent = colors.secondary,
             icon = { drawBackIcon(it) },
         )
         Spacer(Modifier.width(14.dp))
         Text(
             text = stringResource(R.string.campaign_title),
             style = MaterialTheme.typography.headlineSmall,
-            color = SpaceColors.TextPrimary,
+            color = colors.textPrimary,
             modifier = Modifier
                 .weight(1f)
                 .semantics { heading() },
@@ -271,7 +287,7 @@ private fun CampaignTopBar(totalStars: Int, onBack: () -> Unit) {
         StatPill(
             value = stringResource(R.string.campaign_fraction, totalStars, maxStars),
             contentDescription = stringResource(R.string.campaign_stars_total_desc, totalStars, maxStars),
-            accent = SpaceColors.Gold,
+            accent = colors.gold,
             icon = { drawStarIcon(it) },
         )
     }
@@ -280,8 +296,10 @@ private fun CampaignTopBar(totalStars: Int, onBack: () -> Unit) {
 /** Where the trunk splits: one stem coming down, one drop per branch in its colour, in map order. */
 @Composable
 private fun ForkConnector(trunkDone: Boolean, modifier: Modifier = Modifier) {
-    val stemColor = if (trunkDone) branchAccent(Branch.TRUNK).copy(alpha = 0.8f) else SpaceColors.PanelBorder
+    val colors = themeColors
+    val stemColor = if (trunkDone) branchAccent(Branch.TRUNK, colors).copy(alpha = 0.8f) else colors.panelBorder
     val drops = BRANCH_ORDER
+    val dropColors = drops.map { branchAccent(it, colors).copy(alpha = if (trunkDone) 0.85f else 0.35f) }
     Canvas(modifier) {
         val stroke = PATH_STROKE.toPx()
         val midY = size.height * 0.45f
@@ -291,7 +309,7 @@ private fun ForkConnector(trunkDone: Boolean, modifier: Modifier = Modifier) {
         drawLine(stemColor, Offset(first, midY), Offset(last, midY), stroke, StrokeCap.Round)
         for (k in drops.indices) {
             val x = first + (last - first) * k / (drops.size - 1)
-            val color = branchAccent(drops[k]).copy(alpha = if (trunkDone) 0.85f else 0.35f)
+            val color = dropColors[k]
             drawLine(color, Offset(x, midY), Offset(x, size.height - stroke * 2f), stroke, StrokeCap.Round)
             drawCircle(color, radius = stroke * 1.4f, center = Offset(x, size.height - stroke * 2f))
         }
@@ -307,7 +325,8 @@ private fun BranchSection(
     onPlay: (LevelSpec) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val accent = branchAccent(branch)
+    val colors = themeColors
+    val accent = branchAccent(branch, colors)
     val open = progress.isBranchOpen(branch)
     val shape = RoundedCornerShape(20.dp)
     Column(
@@ -316,7 +335,7 @@ private fun BranchSection(
             .clip(shape)
             .background(
                 Brush.verticalGradient(
-                    listOf(accent.copy(alpha = if (open) 0.12f else 0.05f), SpaceColors.Panel.copy(alpha = 0.72f)),
+                    listOf(accent.copy(alpha = if (open) 0.12f else 0.05f), colors.panel.copy(alpha = 0.72f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = if (open) 0.45f else 0.18f), shape)
@@ -330,7 +349,8 @@ private fun BranchSection(
 
 @Composable
 private fun BranchHeader(branch: Branch, progress: CampaignProgress, open: Boolean) {
-    val accent = branchAccent(branch)
+    val colors = themeColors
+    val accent = branchAccent(branch, colors)
     val name = stringResource(branchNameRes(branch))
     val size = Campaign.levels(branch).size
     val completed = progress.completedCount(branch)
@@ -359,21 +379,17 @@ private fun BranchHeader(branch: Branch, progress: CampaignProgress, open: Boole
             Text(
                 text = name,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (open) SpaceColors.TextPrimary else SpaceColors.TextSecondary,
+                color = if (open) colors.textPrimary else colors.textSecondary,
                 modifier = Modifier.weight(1f),
             )
             if (!open) {
-                Canvas(Modifier.size(16.dp)) { drawLockIcon(SpaceColors.TextMuted) }
+                val lockColor = colors.textMuted
+                Canvas(Modifier.size(16.dp)) { drawLockIcon(lockColor) }
                 Spacer(Modifier.width(8.dp))
             }
             Text(
                 text = stringResource(R.string.campaign_fraction, completed, size),
-                style = TextStyle(
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFeatureSettings = "tnum",
-                    color = if (completed == size) SpaceColors.Gold else SpaceColors.TextSecondary,
-                ),
+                style = numberTextStyle(15f, if (completed == size) colors.gold else colors.textSecondary),
             )
         }
         if (!open) {
@@ -381,14 +397,14 @@ private fun BranchHeader(branch: Branch, progress: CampaignProgress, open: Boole
             Text(
                 text = unlockCondition(branch),
                 style = MaterialTheme.typography.bodySmall,
-                color = SpaceColors.TextSecondary,
+                color = colors.textSecondary,
             )
             val feeders = feederProgress(branch, progress)
             if (feeders.isNotEmpty()) {
                 Text(
                     text = feeders,
                     style = MaterialTheme.typography.bodySmall,
-                    color = SpaceColors.TextMuted,
+                    color = colors.textMuted,
                 )
             }
         }
@@ -463,7 +479,7 @@ private fun LevelPath(
     val rows = (levels.size + PATH_COLUMNS - 1) / PATH_COLUMNS
     val current = frontier(progress, branch)
     val doneColor = accent.copy(alpha = 0.75f)
-    val todoColor = SpaceColors.PanelBorder.copy(alpha = 0.55f)
+    val todoColor = themeColors.panelBorder.copy(alpha = 0.55f)
     Box(Modifier.fillMaxWidth()) {
         // Lines between consecutive levels; a line is lit once the level it starts from is completed.
         Canvas(Modifier.matchParentSize()) {
@@ -542,6 +558,7 @@ private fun LevelNode(
     }
     val description = stringResource(R.string.campaign_node_desc, name, level.number, state)
     val completed = stars > 0
+    val colors = themeColors
     Column(
         modifier = modifier
             .padding(top = NODE_TOP - NODE_TOUCH_PADDING)
@@ -557,16 +574,17 @@ private fun LevelNode(
                 val r = size.minDimension / 2f
                 val border = 2.dp.toPx()
                 // Opaque base so the path lines do not show through the node.
-                drawCircle(SpaceColors.SpaceMid, radius = r)
+                drawCircle(colors.backgroundMid, radius = r)
                 when {
                     !unlocked -> {
-                        drawCircle(SpaceColors.Panel, radius = r)
-                        drawCircle(SpaceColors.PanelBorder.copy(alpha = 0.6f), radius = r - border / 2f, style = Stroke(width = border / 2f))
+                        drawCircle(colors.panel, radius = r)
+                        drawCircle(colors.panelBorder.copy(alpha = 0.6f), radius = r - border / 2f, style = Stroke(width = border / 2f))
                     }
                     completed -> {
+                        val fill = colors.completedFill
                         drawCircle(
                             Brush.radialGradient(
-                                listOf(accent.copy(alpha = 0.7f), accent.copy(alpha = 0.22f)),
+                                listOf(accent.copy(alpha = fill), accent.copy(alpha = fill * COMPLETED_EDGE_RATIO)),
                                 center = Offset(center.x - r * 0.3f, center.y - r * 0.3f),
                                 radius = r * 1.6f,
                             ),
@@ -583,22 +601,20 @@ private fun LevelNode(
             if (unlocked) {
                 Text(
                     text = level.number.toString(),
-                    style = TextStyle(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFeatureSettings = "tnum",
-                        color = if (completed) SpaceColors.TextPrimary else accent,
+                    style = numberTextStyle(
+                        17f,
+                        if (completed) colors.textPrimary else branchTextColor(level.branch, colors),
                     ),
                     // The node's description already names the level.
                     modifier = Modifier.clearAndSetSemantics { },
                 )
             } else {
-                Canvas(Modifier.size(18.dp)) { drawLockIcon(SpaceColors.TextMuted) }
+                Canvas(Modifier.size(18.dp)) { drawLockIcon(colors.textMuted) }
             }
         }
         Spacer(Modifier.height(NODE_STAR_GAP))
         if (unlocked) {
-            StarRow(stars = stars, starSize = NODE_STAR_SIZE, emptyColor = SpaceColors.TextMuted.copy(alpha = 0.6f))
+            StarRow(stars = stars, starSize = NODE_STAR_SIZE, emptyColor = colors.textMuted.copy(alpha = 0.6f))
         } else {
             Spacer(Modifier.height(NODE_STAR_SIZE))
         }
@@ -643,6 +659,9 @@ private val NODE_TOUCH_PADDING = 4.dp
 private val NODE_STAR_GAP = 5.dp
 private val NODE_STAR_SIZE = 11.dp
 private val GLOW_SPREAD = 12.dp
+
+/** Alpha of a completed level's fill at its edge relative to its alpha at the highlight. */
+private const val COMPLETED_EDGE_RATIO = 0.22f / 0.7f
 private val SECTION_MAX_WIDTH = 520.dp
 private val SECTION_GAP = 16.dp
 

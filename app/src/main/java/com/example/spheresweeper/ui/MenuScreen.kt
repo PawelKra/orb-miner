@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -63,7 +65,12 @@ import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
-import com.example.spheresweeper.ui.theme.SpaceColors
+import com.example.spheresweeper.ui.theme.GameTheme
+import com.example.spheresweeper.ui.theme.GameThemes
+import com.example.spheresweeper.ui.theme.LocalGameTheme
+import com.example.spheresweeper.ui.theme.UiPalette
+import com.example.spheresweeper.ui.theme.numberTextStyle
+import com.example.spheresweeper.ui.theme.themeColors
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -74,7 +81,7 @@ fun MenuScreen(vm: GameViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
-        SpaceBackground()
+        ThemeBackground()
 
         if (landscape) {
             Row(
@@ -139,29 +146,34 @@ fun MenuScreen(vm: GameViewModel) {
 
 @Composable
 private fun MenuHeader(geometry: SphereGeometry, orbSize: Dp) {
+    val colors = themeColors
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         MenuOrb(geometry, Modifier.size(orbSize))
         Spacer(Modifier.height(8.dp))
         Text(
             text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.displaySmall,
-            color = SpaceColors.TextPrimary,
+            color = colors.textPrimary,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.menu_subtitle),
             style = MaterialTheme.typography.bodyMedium,
-            color = SpaceColors.Cyan.copy(alpha = 0.85f),
+            color = colors.primary.copy(alpha = 0.85f),
             textAlign = TextAlign.Center,
         )
     }
 }
 
-/** Slowly spinning decorative ball drawn with the game renderer. */
+/** Slowly spinning decorative ball drawn with the game renderer in the current theme. */
 @Composable
 private fun MenuOrb(geometry: SphereGeometry, modifier: Modifier = Modifier) {
-    val renderer = remember(geometry) { SphereRenderer(geometry) }
+    val theme = LocalGameTheme.current
+    val context = LocalContext.current
+    val renderer = remember(geometry, theme) {
+        SphereRenderer(geometry, theme.sphere, theme.font.canvasTypeface(context))
+    }
     val orientation = remember { Quaternion().setFromAxisAngle(1f, 0.3f, 0f, 0.6f) }
     val step = remember { Quaternion() }
     var tick by remember { mutableIntStateOf(0) }
@@ -197,11 +209,12 @@ private fun MenuOrb(geometry: SphereGeometry, modifier: Modifier = Modifier) {
 private fun ColumnScope.BoardList(vm: GameViewModel) {
     SectionTitle(stringResource(R.string.menu_free_play))
     val sizes = BoardSize.values()
+    val colors = themeColors
     for (index in sizes.indices) {
         val boardSize = sizes[index]
         BoardCard(
             boardSize = boardSize,
-            accent = boardAccent(index, sizes.size),
+            accent = boardAccent(index, sizes.size, colors),
             best = vm.bestTimes[boardSize],
             onClick = { vm.startGame(boardSize) },
         )
@@ -209,13 +222,14 @@ private fun ColumnScope.BoardList(vm: GameViewModel) {
     }
 }
 
-private fun boardAccent(index: Int, count: Int): Color {
+/** Badge colour of board [index] of [count]: runs through the theme's board accents. */
+private fun boardAccent(index: Int, count: Int, colors: UiPalette): Color {
+    val stops = colors.boardAccents
+    if (stops.size == 1) return stops[0]
     val t = if (count <= 1) 0f else index.toFloat() / (count - 1)
-    return if (t < 0.5f) {
-        lerp(Color(0xFF2EE6D6), Color(0xFF4F8BFF), t * 2f)
-    } else {
-        lerp(Color(0xFF4F8BFF), Color(0xFFB07BFF), (t - 0.5f) * 2f)
-    }
+    val scaled = t * (stops.size - 1)
+    val k = minOf(stops.size - 2, scaled.toInt())
+    return lerp(stops[k], stops[k + 1], scaled - k)
 }
 
 private fun boardNameRes(size: BoardSize): Int = when (size) {
@@ -232,7 +246,7 @@ private fun SectionTitle(text: String) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.titleSmall,
-        color = SpaceColors.TextMuted,
+        color = themeColors.textMuted,
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 4.dp, bottom = 10.dp),
@@ -242,6 +256,7 @@ private fun SectionTitle(text: String) {
 @Composable
 private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
+    val colors = themeColors
     val resources = LocalContext.current.resources
     val cells = resources.getQuantityString(R.plurals.cells_count, boardSize.cellCount, boardSize.cellCount)
     // With ocean the mine count follows the drawn land, so the card shows the count for the expected land.
@@ -262,7 +277,7 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
             .clip(shape)
             .background(
                 Brush.horizontalGradient(
-                    listOf(accent.copy(alpha = 0.16f), SpaceColors.Panel.copy(alpha = 0.75f)),
+                    listOf(accent.copy(alpha = 0.16f), colors.panel.copy(alpha = 0.75f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.45f), shape)
@@ -276,12 +291,12 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
             Text(
                 text = stringResource(boardNameRes(boardSize)),
                 style = MaterialTheme.typography.titleMedium,
-                color = SpaceColors.TextPrimary,
+                color = colors.textPrimary,
             )
             Text(
                 text = details,
                 style = MaterialTheme.typography.bodySmall,
-                color = SpaceColors.TextSecondary,
+                color = colors.textSecondary,
             )
         }
         Spacer(Modifier.width(8.dp))
@@ -290,22 +305,17 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
                 Text(
                     text = stringResource(R.string.best_label),
                     style = MaterialTheme.typography.bodySmall,
-                    color = SpaceColors.TextMuted,
+                    color = colors.textMuted,
                 )
                 Text(
                     text = formatDuration(best),
-                    style = TextStyle(
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFeatureSettings = "tnum",
-                        color = SpaceColors.Gold,
-                    ),
+                    style = numberTextStyle(16f, colors.gold),
                 )
             } else {
                 Text(
                     text = stringResource(R.string.best_time_none),
                     style = MaterialTheme.typography.bodySmall,
-                    color = SpaceColors.TextMuted,
+                    color = colors.textMuted,
                 )
             }
         }
@@ -316,7 +326,8 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
 @Composable
 private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
-    val accent = SpaceColors.Gold
+    val colors = themeColors
+    val accent = colors.gold
     val levelCount = Campaign.all.size
     val completed = Campaign.all.count { progress.isCompleted(it) }
     val stars = progress.totalStars
@@ -328,7 +339,7 @@ private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
             .clip(shape)
             .background(
                 Brush.horizontalGradient(
-                    listOf(accent.copy(alpha = 0.18f), SpaceColors.Violet.copy(alpha = 0.14f), SpaceColors.Panel.copy(alpha = 0.75f)),
+                    listOf(accent.copy(alpha = 0.18f), colors.secondary.copy(alpha = 0.14f), colors.panel.copy(alpha = 0.75f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.55f), shape)
@@ -342,23 +353,18 @@ private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
             Text(
                 text = stringResource(R.string.campaign_title),
                 style = MaterialTheme.typography.titleMedium,
-                color = SpaceColors.TextPrimary,
+                color = colors.textPrimary,
             )
             Text(
                 text = stringResource(R.string.campaign_card_subtitle, completed, levelCount),
                 style = MaterialTheme.typography.bodySmall,
-                color = SpaceColors.TextSecondary,
+                color = colors.textSecondary,
             )
         }
         Spacer(Modifier.width(8.dp))
         Text(
             text = stringResource(R.string.campaign_stars_total, stars, maxStars),
-            style = TextStyle(
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                fontFeatureSettings = "tnum",
-                color = accent,
-            ),
+            style = numberTextStyle(16f, accent),
             modifier = Modifier.semantics { contentDescription = starsDescription },
         )
     }
@@ -418,7 +424,139 @@ private fun ColumnScope.SettingsSection(vm: GameViewModel) {
         checked = vm.hapticsEnabled,
         onCheckedChange = { vm.updateHapticsEnabled(it) },
     )
+    Spacer(Modifier.height(16.dp))
+    ThemePicker(selected = vm.theme, onSelect = { vm.updateTheme(it) })
 }
+
+/**
+ * Theme choice: one tile per registered theme, drawn in that theme's own colours and font, with its
+ * name, a "123" sample in its number colours and dots of its ball palette. The tiles form a radio
+ * group for accessibility services; a choice applies at once.
+ */
+@Composable
+private fun ThemePicker(selected: GameTheme, onSelect: (GameTheme) -> Unit) {
+    Text(
+        text = stringResource(R.string.setting_theme),
+        style = MaterialTheme.typography.titleMedium,
+        color = themeColors.textPrimary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, bottom = 8.dp),
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        for (row in GameThemes.all.chunked(THEME_COLUMNS)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (theme in row) {
+                    ThemeTile(
+                        theme = theme,
+                        selected = theme.id == selected.id,
+                        onClick = { onSelect(theme) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                // A short last row keeps the tile width of the full rows.
+                for (k in row.size until THEME_COLUMNS) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** One theme in its own background, font and colours; the selected tile has a thick accent border. */
+@Composable
+private fun ThemeTile(theme: GameTheme, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(16.dp)
+    val ui = theme.ui
+    val sphere = theme.sphere
+    val font = theme.font
+    val name = stringResource(theme.nameRes)
+    val description = stringResource(R.string.setting_theme_desc, name)
+    val numbers = sphere.numbers
+    val southCovered = sphere.covered.first()
+    val northCovered = sphere.covered.last()
+    val dots = listOf(
+        Color(southCovered.r, southCovered.g, southCovered.b),
+        Color(northCovered.r, northCovered.g, northCovered.b),
+        Color(sphere.flag),
+        Color(sphere.far),
+    )
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(Brush.verticalGradient(listOf(ui.backgroundTop, ui.backgroundBottom)))
+            .border(
+                width = if (selected) 2.5.dp else 1.dp,
+                color = if (selected) ui.primary else ui.panelBorder.copy(alpha = 0.8f),
+                shape = shape,
+            )
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = description }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = name,
+                style = TextStyle(
+                    color = ui.textPrimary,
+                    fontSize = (17f * font.scale).sp,
+                    fontFamily = font.family,
+                    fontWeight = font.weight ?: FontWeight.SemiBold,
+                ),
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            RadioMark(selected = selected, color = ui.primary, ring = ui.textSecondary)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(sphere.revealedSwatch))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                for (n in 1..3) {
+                    Text(
+                        text = n.toString(),
+                        style = TextStyle(
+                            color = Color(numbers[minOf(n, numbers.size - 1)]),
+                            fontSize = (18f * font.scale).sp,
+                            fontFamily = font.family,
+                            fontWeight = font.weight ?: FontWeight.Bold,
+                            fontFeatureSettings = "tnum, lnum",
+                        ),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            for (dot in dots) {
+                Spacer(Modifier.width(4.dp))
+                Canvas(Modifier.size(12.dp)) {
+                    drawCircle(dot)
+                    drawCircle(ui.textPrimary.copy(alpha = 0.25f), style = Stroke(width = 1.dp.toPx()))
+                }
+            }
+        }
+    }
+}
+
+/** Radio indicator of a theme tile: a ring, filled in [color] when [selected]. */
+@Composable
+private fun RadioMark(selected: Boolean, color: Color, ring: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val r = size.minDimension / 2f
+        val stroke = 1.8.dp.toPx()
+        drawCircle(if (selected) color else ring, radius = r - stroke / 2f, style = Stroke(width = stroke))
+        if (selected) drawCircle(color, radius = r * 0.5f)
+    }
+}
+
+/** Theme tiles per row in the settings. */
+private const val THEME_COLUMNS = 2
 
 @Composable
 private fun SettingRow(
@@ -428,31 +566,32 @@ private fun SettingRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val shape = RoundedCornerShape(18.dp)
+    val colors = themeColors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(SpaceColors.Panel.copy(alpha = 0.7f))
-            .border(1.dp, SpaceColors.PanelBorder.copy(alpha = 0.7f), shape)
+            .background(colors.panel.copy(alpha = 0.7f))
+            .border(1.dp, colors.panelBorder.copy(alpha = 0.7f), shape)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium, color = SpaceColors.TextPrimary)
-            Text(text = description, style = MaterialTheme.typography.bodySmall, color = SpaceColors.TextSecondary)
+            Text(text = title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+            Text(text = description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         }
         Spacer(Modifier.width(12.dp))
         Switch(
             checked = checked,
             onCheckedChange = null,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF04161C),
-                checkedTrackColor = SpaceColors.Cyan,
-                checkedBorderColor = SpaceColors.Cyan,
-                uncheckedThumbColor = SpaceColors.TextSecondary,
-                uncheckedTrackColor = SpaceColors.SpaceMid,
-                uncheckedBorderColor = SpaceColors.PanelBorder,
+                checkedThumbColor = colors.switchThumb,
+                checkedTrackColor = colors.primary,
+                checkedBorderColor = colors.primary,
+                uncheckedThumbColor = colors.textSecondary,
+                uncheckedTrackColor = colors.backgroundMid,
+                uncheckedBorderColor = colors.panelBorder,
             ),
         )
     }

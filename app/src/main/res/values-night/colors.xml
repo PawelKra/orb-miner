@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- In system dark mode the window starts dark, which matches the dark themes. -->
+    <color name="window_background">@color/window_kosmos</color>
+</resources>
