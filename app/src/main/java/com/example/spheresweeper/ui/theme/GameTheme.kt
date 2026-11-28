@@ -106,7 +106,8 @@ class UiPalette(
     /**
      * Text in a campaign branch colour (level labels, level numbers), or null to write it in the branch
      * colour itself. Light themes set darker shades here so that the text keeps 4.5:1 on the background
-     * and on the tinted level nodes, while fills and outlines keep the lighter branch colours.
+     * and on the tinted level nodes, while fills and outlines keep the lighter branch colours; a dark
+     * theme may set lighter shades for the same reason.
      */
     val branchText: BranchTextColors? = null,
     /**

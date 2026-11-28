@@ -44,6 +44,12 @@ import kotlin.math.sin
 private val ButtonShape = RoundedCornerShape(16.dp)
 private val PillShape = RoundedCornerShape(50)
 
+/**
+ * Alpha of the panel colour under the menu cards, the settings rows and the campaign sections. Their
+ * accent tint fades out on top of it, and the text colours of every theme keep their contrast on it.
+ */
+internal const val CARD_PANEL_ALPHA = 0.85f
+
 /** Soft glow drawn just outside the bounds, behind a rounded control; [strength] scales its alpha. */
 private fun Modifier.outerGlow(color: Color, corner: Dp, spread: Dp, strength: Float): Modifier = drawBehind {
     val s = spread.toPx()

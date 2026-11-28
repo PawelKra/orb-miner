@@ -25,11 +25,18 @@ enum class MoveResult { NOTHING, REVEALED, MINE_HIT, WON, LOST }
  * present safe cell is revealed. By default every cell is present.
  *
  * A cell with a lock ([lockThreshold] above 0) hides its number while fewer than that many cells are
- * revealed on the whole board ([isLockOpen]). It can be revealed like any cell, but while it is locked a
- * zero on it does not spread and it cannot be chorded, since either would give the number away. When
- * [revealedCount] reaches the threshold the lock opens; if the cell is revealed and shows 0, its zero
- * spreads at once as on a normal reveal, and locks that this spread opens in turn act the same way.
- * Lock cells never receive mines when the board places them itself.
+ * revealed ([isLockOpen]). It can be revealed like any cell, but while it is locked a zero on it does
+ * not spread and it cannot be chorded, since either would give the number away. When the count reaches
+ * the threshold the lock opens; if the cell is revealed and shows 0, its zero spreads at once as on a
+ * normal reveal, and locks that this spread opens in turn act the same way. Lock cells never receive
+ * mines when the board places them itself.
+ *
+ * Without [lockRegions] a lock counts the revealed cells of the whole board ([revealedCount]). With
+ * them it counts only the revealed cells of its own region: lockRegions[i] is the region of cell i when
+ * that region is counted by a lock, -1 otherwise, and every lock cell lies in a counted region. Regions
+ * are plain numbers here; [NoGuessGenerator] uses those of [BoardLayout.regionOf] and sets each threshold
+ * to the safe cells of the region, so a lock opens once its region is solved. [lockRemaining] gives the
+ * cells still missing in either mode.
  */
 class MinesweeperBoard(
     val neighbors: Array<IntArray>,
@@ -38,6 +45,7 @@ class MinesweeperBoard(
     lives: Int = 1,
     present: BooleanArray? = null,
     lockThresholds: IntArray? = null,
+    lockRegions: IntArray? = null,
 ) {
     val cellCount: Int = neighbors.size
 
@@ -49,7 +57,13 @@ class MinesweeperBoard(
     /** Per cell: revealed cells needed before its number shows, 0 for cells without a lock. */
     private val lockThreshold: IntArray = lockThresholds?.copyOf() ?: IntArray(cellCount)
 
-    /** Lock cells by rising threshold; locks before [nextLock] have been opened. */
+    /** Per cell: region whose revealed cells the locks in it count, -1 outside such regions; null: whole board. */
+    private val lockRegion: IntArray? = lockRegions?.copyOf()
+
+    /** Revealed cells per counted region; empty without [lockRegions]. */
+    private val regionRevealed: IntArray
+
+    /** Lock cells by rising threshold; without [lockRegions], locks before [nextLock] have been opened. */
     private val lockOrder: IntArray
 
     private var nextLock = 0
@@ -57,12 +71,24 @@ class MinesweeperBoard(
     init {
         require(this.present.size == cellCount) { "present has ${this.present.size} cells, expected $cellCount" }
         require(lockThreshold.size == cellCount) { "lockThresholds has ${lockThreshold.size} cells, expected $cellCount" }
+        require(lockRegion == null || lockRegion.size == cellCount) {
+            "lockRegions has ${lockRegion?.size} cells, expected $cellCount"
+        }
+        var regionCount = 0
         for (cell in 0 until cellCount) {
             require(lockThreshold[cell] >= 0) { "cell $cell has negative lock threshold" }
             require(this.present[cell] || lockThreshold[cell] == 0) { "cell $cell is not present but has a lock" }
             if (!this.present[cell]) require(neighbors[cell].isEmpty()) { "cell $cell is not present but has neighbours" }
             for (nb in neighbors[cell]) require(this.present[nb]) { "cell $cell lists cell $nb, which is not present" }
+            if (lockRegion != null) {
+                val region = lockRegion[cell]
+                require(region >= -1) { "cell $cell has lock region $region" }
+                require(region < 0 || this.present[cell]) { "cell $cell is not present but has a lock region" }
+                require(lockThreshold[cell] == 0 || region >= 0) { "lock cell $cell has no lock region" }
+                regionCount = maxOf(regionCount, region + 1)
+            }
         }
+        regionRevealed = IntArray(regionCount)
         lockOrder = (0 until cellCount).filter { lockThreshold[it] > 0 }
             .sortedWith(compareBy({ lockThreshold[it] }, { it }))
             .toIntArray()
@@ -134,8 +160,21 @@ class MinesweeperBoard(
     /** Revealed cells needed before the number of [cell] shows; 0 when it has no lock. */
     fun lockThreshold(cell: Int): Int = lockThreshold[cell]
 
-    /** True when the number of [cell] may be shown: it has no lock or enough cells are revealed. */
-    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= revealedCount
+    /**
+     * True when the number of [cell] may be shown: it has no lock or enough cells are revealed, on the
+     * whole board or in its region (see [lockRegions]).
+     */
+    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= lockCounted(cell)
+
+    /** Cells still to reveal before the lock of [cell] opens: 0 when it is open or there is no lock. */
+    fun lockRemaining(cell: Int): Int = maxOf(0, lockThreshold[cell] - lockCounted(cell))
+
+    /** Revealed cells the lock of [cell] counts: the whole board, or its region with [lockRegions]. */
+    private fun lockCounted(cell: Int): Int {
+        if (lockRegion == null) return revealedCount
+        val region = lockRegion[cell]
+        return if (region >= 0) regionRevealed[region] else revealedCount
+    }
 
     fun isRevealed(cell: Int): Boolean = revealed[cell]
 
@@ -236,6 +275,38 @@ class MinesweeperBoard(
             if (!revealed[nb] && !flagged[nb] && !detonated[nb]) return true
         }
         return false
+    }
+
+    /**
+     * Cells that must hold a mine by the number on [cell] alone, for flagging them at once. Does not
+     * change the board.
+     *
+     * The number on [cell] counts the cells of neighbors[cell] (its scope: walls, far range or row
+     * included). When the cells of the scope that are not revealed, flagged ones and detonated mines
+     * included, are exactly as many as the number, every one of them is a mine. The result then lists
+     * those that still need a flag: not flagged and not detonated, in scope order. It is empty when all
+     * of them already carry a flag or have gone off, and for a number 0 with nothing covered around it.
+     *
+     * Returns null when the number gives no such certainty: more cells are covered than the number,
+     * or the move does not apply because the game is not PLAYING, [cell] is not revealed, or its lock is
+     * still closed (the number is hidden).
+     */
+    fun autoFlagCells(cell: Int): IntArray? {
+        if (status != GameStatus.PLAYING || !revealed[cell] || mine[cell] || !isLockOpen(cell)) return null
+        var covered = 0
+        var toFlag = 0
+        for (nb in neighbors[cell]) {
+            if (revealed[nb]) continue
+            covered++
+            if (!flagged[nb] && !detonated[nb]) toFlag++
+        }
+        if (covered != adjacent[cell]) return null
+        val result = IntArray(toFlag)
+        var k = 0
+        for (nb in neighbors[cell]) {
+            if (!revealed[nb] && !flagged[nb] && !detonated[nb]) result[k++] = nb
+        }
+        return result
     }
 
     /**
@@ -343,11 +414,24 @@ class MinesweeperBoard(
         revealed[cell] = true
         revealedCount++
         stack[stackTop++] = cell
-        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
-            val opened = lockOrder[nextLock++]
-            // A revealed zero held back by its lock spreads now.
-            if (revealed[opened] && adjacent[opened] == 0) stack[stackTop++] = opened
+        if (lockRegion != null) {
+            val region = lockRegion[cell]
+            if (region < 0) return
+            val count = ++regionRevealed[region]
+            // Counts grow by one, so a lock opens exactly when its region's count equals its threshold.
+            for (opened in lockOrder) {
+                if (lockRegion[opened] == region && lockThreshold[opened] == count) spreadOpened(opened)
+            }
+            return
         }
+        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
+            spreadOpened(lockOrder[nextLock++])
+        }
+    }
+
+    /** A revealed zero held back by the lock of [opened], which has just opened, spreads now. */
+    private fun spreadOpened(opened: Int) {
+        if (revealed[opened] && adjacent[opened] == 0) stack[stackTop++] = opened
     }
 
     /** A mine went off but a spare life absorbs it. */

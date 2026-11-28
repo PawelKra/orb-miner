@@ -122,5 +122,5 @@ object SphereCamera {
 /** One-shot board animations started by the view model. */
 enum class SphereEffect { NONE, HINT, MINE_HIT, EXPLOSION, WIN }
 
-/** Haptic event produced by a move. */
-enum class Feedback { NONE, FLAG, CHORD, EXPLOSION }
+/** Haptic event produced by a move. REJECT: a gesture that could not act, such as an uncertain auto flag. */
+enum class Feedback { NONE, FLAG, CHORD, EXPLOSION, REJECT }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -41,6 +42,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -51,6 +53,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -111,6 +114,8 @@ fun MenuScreen(vm: GameViewModel) {
                         .padding(vertical = 16.dp),
                 ) {
                     CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
+                    Spacer(Modifier.height(10.dp))
+                    HowToCard(onClick = { vm.openHowTo() })
                     Spacer(Modifier.height(20.dp))
                     BoardList(vm)
                 }
@@ -133,6 +138,8 @@ fun MenuScreen(vm: GameViewModel) {
                     MenuHeader(orbGeometry, orbSize = 180.dp)
                     Spacer(Modifier.height(20.dp))
                     CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
+                    Spacer(Modifier.height(10.dp))
+                    HowToCard(onClick = { vm.openHowTo() })
                     Spacer(Modifier.height(20.dp))
                     BoardList(vm)
                     Spacer(Modifier.height(24.dp))
@@ -160,7 +167,7 @@ private fun MenuHeader(geometry: SphereGeometry, orbSize: Dp) {
         Text(
             text = stringResource(R.string.menu_subtitle),
             style = MaterialTheme.typography.bodyMedium,
-            color = colors.primary.copy(alpha = 0.85f),
+            color = colors.primary,
             textAlign = TextAlign.Center,
         )
     }
@@ -275,9 +282,10 @@ private fun BoardCard(boardSize: BoardSize, accent: Color, best: Long?, onClick:
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
             .background(
                 Brush.horizontalGradient(
-                    listOf(accent.copy(alpha = 0.16f), colors.panel.copy(alpha = 0.75f)),
+                    listOf(accent.copy(alpha = 0.16f), accent.copy(alpha = 0f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.45f), shape)
@@ -337,9 +345,10 @@ private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
             .background(
                 Brush.horizontalGradient(
-                    listOf(accent.copy(alpha = 0.18f), colors.secondary.copy(alpha = 0.14f), colors.panel.copy(alpha = 0.75f)),
+                    listOf(accent.copy(alpha = 0.18f), colors.secondary.copy(alpha = 0.14f), colors.secondary.copy(alpha = 0f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.55f), shape)
@@ -368,6 +377,77 @@ private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
             modifier = Modifier.semantics { contentDescription = starsDescription },
         )
     }
+}
+
+/** Entry to the "How to play" screen: the rules and a legend of the cell marks. */
+@Composable
+private fun HowToCard(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    val colors = themeColors
+    val accent = colors.primary
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(accent.copy(alpha = 0.14f), accent.copy(alpha = 0f)),
+                ),
+            )
+            .border(1.dp, accent.copy(alpha = 0.45f), shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+            Spacer(
+                Modifier
+                    .fillMaxSize()
+                    .hexOutline(accent),
+            )
+            Text(
+                text = "?",
+                style = numberTextStyle(18f, accent),
+                // The mark is decoration; the title next to it names the button.
+                modifier = Modifier.clearAndSetSemantics { },
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.how_to_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textPrimary,
+            )
+            Text(
+                text = stringResource(R.string.how_to_card_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+/**
+ * Hexagon outline, the badge of the "How to play" card. It has no fill: on a tint of the accent the
+ * question mark in the accent colour would drop below 4.5:1. The path and the stroke are built when the
+ * size or [accent] changes, not on every draw.
+ */
+private fun Modifier.hexOutline(accent: Color): Modifier = drawWithCache {
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+    val outer = size.minDimension * 0.48f
+    val path = Path()
+    for (k in 0 until 6) {
+        val angle = (PI / 6.0 + k * PI / 3.0).toFloat()
+        val x = cx + cos(angle) * outer
+        val y = cy + sin(angle) * outer
+        if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    val stroke = Stroke(width = 1.5.dp.toPx())
+    onDrawBehind { drawPath(path, accent, style = stroke) }
 }
 
 /** Glowing hexagon used as the board-size badge. */
@@ -571,7 +651,7 @@ private fun SettingRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(colors.panel.copy(alpha = 0.7f))
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
             .border(1.dp, colors.panelBorder.copy(alpha = 0.7f), shape)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -591,7 +671,8 @@ private fun SettingRow(
                 checkedBorderColor = colors.primary,
                 uncheckedThumbColor = colors.textSecondary,
                 uncheckedTrackColor = colors.backgroundMid,
-                uncheckedBorderColor = colors.panelBorder,
+                // The track blends into the row, so the outline in the thumb colour marks the switch.
+                uncheckedBorderColor = colors.textSecondary,
             ),
         )
     }

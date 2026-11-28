@@ -14,11 +14,19 @@ import kotlin.math.roundToInt
  * - [wallMaxLength]: longest wall in cell edges; the shortest one is half of that, at least 2.
  * - [farCells]: cells whose number counts mines up to two steps away instead of one.
  * - [lineCells]: cells whose number counts mines in a straight row of cells running from one of
- *   their edges, up to 2 * [frequency] cells long, instead of their neighbours.
+ *   their edges, up to 2 * [frequency] cells long, instead of their neighbours. On a board with
+ *   rooms they stand only at passages, at most one per passage, so the board often gets fewer.
  * - [islands]: islands the land is split into by the ocean, 0 for a sphere without ocean. At most
  *   [BoardLayout.maxIslandCount] for [frequency]; portals always join the islands.
  * - [portals]: extra portal pairs on top of those that join the islands.
- * - [locks]: cells whose number stays hidden until enough cells on the board are revealed.
+ * - [locks]: cells whose number stays hidden until enough cells are revealed. On a board with rooms
+ *   they stand at passages into the next room and show their number once their own room is solved;
+ *   only some passages qualify, so the board often gets fewer locks.
+ * - [rooms]: rooms the land is split into, passed as the room count of [BoardLayout.generate]; 0
+ *   leaves the land open. Rooms are separated by walls and joined by single-edge passages. Every
+ *   size stays within [BoardLayout.maxRoomCount] for its [frequency] and [islands]. The counts give
+ *   enough passages for about half of [lineCells] or more on average, while a room keeps over 30
+ *   cells on average.
  */
 enum class BoardSize(
     val frequency: Int,
@@ -32,30 +40,31 @@ enum class BoardSize(
     val islands: Int,
     val portals: Int,
     val locks: Int,
+    val rooms: Int,
 ) {
     TINY(
         frequency = 2, mines = 6, lives = 1, hints = 0, walls = 0, wallMaxLength = 0, farCells = 0, lineCells = 0,
-        islands = 0, portals = 0, locks = 0,
+        islands = 0, portals = 0, locks = 0, rooms = 0,
     ),
     SMALL(
         frequency = 3, mines = 14, lives = 1, hints = 1, walls = 2, wallMaxLength = 4, farCells = 3, lineCells = 2,
-        islands = 0, portals = 0, locks = 0,
+        islands = 0, portals = 0, locks = 0, rooms = 3,
     ),
     MEDIUM(
         frequency = 4, mines = 28, lives = 2, hints = 1, walls = 3, wallMaxLength = 6, farCells = 5, lineCells = 4,
-        islands = 0, portals = 0, locks = 0,
+        islands = 0, portals = 0, locks = 0, rooms = 4,
     ),
     LARGE(
         frequency = 5, mines = 45, lives = 3, hints = 2, walls = 4, wallMaxLength = 8, farCells = 8, lineCells = 6,
-        islands = 0, portals = 1, locks = 2,
+        islands = 0, portals = 1, locks = 2, rooms = 6,
     ),
     HUGE(
         frequency = 6, mines = 65, lives = 4, hints = 2, walls = 5, wallMaxLength = 10, farCells = 11, lineCells = 8,
-        islands = 2, portals = 1, locks = 3,
+        islands = 2, portals = 1, locks = 3, rooms = 8,
     ),
     GIANT(
         frequency = 8, mines = 125, lives = 5, hints = 3, walls = 7, wallMaxLength = 14, farCells = 18, lineCells = 12,
-        islands = 3, portals = 2, locks = 5,
+        islands = 3, portals = 2, locks = 5, rooms = 11,
     );
 
     val cellCount: Int get() = 10 * frequency * frequency + 2

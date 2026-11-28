@@ -21,6 +21,7 @@ import com.example.spheresweeper.data.GamePreferences
 import com.example.spheresweeper.ui.CampaignScreen
 import com.example.spheresweeper.ui.GameScreen
 import com.example.spheresweeper.ui.GameViewModel
+import com.example.spheresweeper.ui.HowToPlayScreen
 import com.example.spheresweeper.ui.MenuScreen
 import com.example.spheresweeper.ui.Screen
 import com.example.spheresweeper.ui.theme.GameTheme
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
                             Screen.MENU -> MenuScreen(vm)
                             Screen.CAMPAIGN -> CampaignScreen(vm)
                             Screen.GAME -> GameScreen(vm)
+                            Screen.HOW_TO -> HowToPlayScreen(vm)
                         }
                     }
                 }

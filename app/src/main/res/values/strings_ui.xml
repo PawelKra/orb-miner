@@ -56,8 +56,9 @@
     <string name="theme_zmierzch">Zmierzch</string>
     <string name="theme_kosmos">Kosmos</string>
 
-    <string name="hint_double_tap">Stuknij, aby odkryć · stuknij dwa razy, aby postawić flagę · przeciągnij, aby obrócić</string>
-    <string name="hint_long_press">Stuknij, aby odkryć · przytrzymaj, aby postawić flagę · przeciągnij, aby obrócić</string>
+    <string name="hint_double_tap">Stuknij: odkryj, dwa razy: flaga · przytrzymaj liczbę: flagi wokół</string>
+    <string name="hint_long_press">Stuknij: odkryj · przytrzymaj pole: flaga, liczbę: flagi wokół</string>
+    <string name="hint_far_scope">stuknij złoty pierścień: zasięg</string>
 
     <string name="hud_mines_remaining">Pozostałe miny: %1$d</string>
     <string name="hud_lives_remaining">Pozostałe życia: %1$d</string>
@@ -87,7 +88,7 @@
     <string name="branch_lines">Linie</string>
     <string name="branch_mixed">Mieszane</string>
     <string name="branch_portals">Przeskoki</string>
-    <string name="branch_locks">Zamki</string>
+    <string name="branch_locks">Kłódki</string>
     <string name="branch_islands">Wyspy</string>
     <string name="campaign_fraction">%1$d/%2$d</string>
     <string name="campaign_branch_progress_desc">%1$s, ukończone poziomy: %2$d z %3$d</string>
@@ -112,4 +113,35 @@
     <string name="result_new_star_record">Nowy rekord gwiazdek!</string>
 
     <string name="loading">Budowanie kuli…</string>
+
+    <string name="how_to_title">Jak grać</string>
+    <string name="how_to_card_subtitle">Zasady i znaczenie oznaczeń na polach</string>
+    <string name="how_to_goal_title">Cel gry</string>
+    <string name="how_to_goal">Plansza to kula z sześciokątów i 12 pięciokątów. Obracaj ją palcem i odkryj wszystkie pola bez min. Gra zaczyna się od odkrytego obszaru startowego. Każdą planszę da się rozwiązać logiką od tego miejsca, więc nigdy nie musisz zgadywać. Rysunki poniżej pokazują też miny, które w grze są ukryte.</string>
+    <string name="how_to_number_title">Liczba</string>
+    <string name="how_to_number">Liczba na odkrytym polu mówi, ile min jest wśród jego sąsiadów. Na rysunku dwie miny stykają się z polem z dwójką.</string>
+    <string name="how_to_flag_title">Flaga</string>
+    <string name="how_to_flag">Flaga oznacza pole, które uważasz za minę. Stuknij zakryte pole dwa razy, aby postawić albo zdjąć flagę. Gdy w ustawieniach włączysz „Flaga przez przytrzymanie”, przytrzymaj pole. Przytrzymaj odkrytą liczbę, aby oflagować zakryte pola wokół niej, gdy wszystkie muszą być minami.</string>
+    <string name="how_to_wall_title">Ściana</string>
+    <string name="how_to_wall">Pola po dwóch stronach ściany się nie widzą. Liczba nie liczy miny za ścianą, a odkrywanie nie przechodzi przez ścianę. Na rysunku jedynka liczy tylko minę nad sobą.</string>
+    <string name="how_to_passage_title">Przejście</string>
+    <string name="how_to_passage">Ściany dzielą planszę na pokoje. Dwa sąsiednie pokoje mają najwyżej jedną wspólną przerwę szerokości jednej krawędzi. Pola z różnych pokoi widzą się tylko przez taką przerwę albo przez przeskok. Odkrywanie przechodzi między pokojami tą samą drogą.</string>
+    <string name="how_to_far_title">Pole dalekie</string>
+    <string name="how_to_far">Złoty pierścień oznacza pole dalekie. Jego liczba liczy miny w zasięgu dwóch kroków, a nie tylko u sąsiadów. Ściana zasłania ten widok, a przeskok go przenosi. Stuknij odkryte pole dalekie, a kula podświetli jego zasięg. Gdy w ustawieniach włączysz „Flaga przez przytrzymanie”, a flagi i wybuchłe miny w zasięgu wyczerpują już liczbę, stuknięcie zamiast tego odkryje resztę zasięgu, jeśli coś w nim zostało do odkrycia.</string>
+    <string name="how_to_line_title">Pole liniowe</string>
+    <string name="how_to_line">Turkusowa liczba ze strzałką liczy miny w prostym rzędzie pól w stronę strzałki, a nie u sąsiadów. Rząd kończy się na ścianie, wybrzeżu, pięciokącie albo po osiągnięciu limitu długości. Pole liniowe przy przejściu prowadzi rząd przez przejście w głąb następnego pokoju, więc pomaga do niego wejść.</string>
+    <string name="how_to_portal_title">Przeskok</string>
+    <string name="how_to_portal">Dwa odległe pola ze znacznikiem w tym samym kolorze są dla siebie sąsiadami. Liczba jednego liczy drugie, a zero rozlewa się przez parę. Pola przeskoku nigdy nie mają miny.</string>
+    <string name="how_to_lock_title">Kłódka</string>
+    <string name="how_to_lock">Kłódka ukrywa liczbę pola. Stoi przy wyjściu ze swojego pokoju, obok przejścia albo przeskoku prowadzącego dalej, i nigdy nie ma miny. Licznik na niej mówi, ile pól jej pokoju zostało do odkrycia. Gdy rozwiążesz ten pokój, liczba pojawia się z małą otwartą kłódką i pomaga wejść do następnego pokoju.</string>
+    <string name="how_to_island_title">Wyspa i ocean</string>
+    <string name="how_to_island">Część kuli bywa oceanem, na którym nie ma pól. Ląd dzieli się wtedy na wyspy, a łączą je tylko przeskoki.</string>
+
+    <string name="feature_card_new">Nowość</string>
+    <string name="feature_card_board">Na tej planszy</string>
+    <string name="feature_card_counter">%1$d/%2$d</string>
+    <string name="feature_card_counter_desc">Karta %1$d z %2$d</string>
+    <string name="feature_card_next">Dalej</string>
+    <string name="feature_card_ok">OK</string>
+    <string name="action_feature_help">Objaśnij pola tej planszy</string>
 </resources>

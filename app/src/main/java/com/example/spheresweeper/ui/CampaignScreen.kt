@@ -333,9 +333,10 @@ private fun BranchSection(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
             .background(
                 Brush.verticalGradient(
-                    listOf(accent.copy(alpha = if (open) 0.12f else 0.05f), colors.panel.copy(alpha = 0.72f)),
+                    listOf(accent.copy(alpha = if (open) 0.12f else 0.05f), accent.copy(alpha = 0f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = if (open) 0.45f else 0.18f), shape)
@@ -614,7 +615,7 @@ private fun LevelNode(
         }
         Spacer(Modifier.height(NODE_STAR_GAP))
         if (unlocked) {
-            StarRow(stars = stars, starSize = NODE_STAR_SIZE, emptyColor = colors.textMuted.copy(alpha = 0.6f))
+            StarRow(stars = stars, starSize = NODE_STAR_SIZE)
         } else {
             Spacer(Modifier.height(NODE_STAR_SIZE))
         }
@@ -660,8 +661,13 @@ private val NODE_STAR_GAP = 5.dp
 private val NODE_STAR_SIZE = 11.dp
 private val GLOW_SPREAD = 12.dp
 
-/** Alpha of a completed level's fill at its edge relative to its alpha at the highlight. */
-private const val COMPLETED_EDGE_RATIO = 0.22f / 0.7f
+/**
+ * Alpha of a completed level's fill at its edge relative to its alpha at the highlight
+ * ([UiPalette.completedFill]). One ratio for every theme gives all of them the same shading, from the
+ * lit highlight down to under a third of it at the rim. The highlight is the most opaque spot, so the
+ * lowest contrast of the level number depends on completedFill alone.
+ */
+private const val COMPLETED_EDGE_RATIO = 0.314f
 private val SECTION_MAX_WIDTH = 520.dp
 private val SECTION_GAP = 16.dp
 

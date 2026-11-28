@@ -27,7 +27,8 @@ package com.example.spheresweeper.logic
  *
  * Locks follow [MinesweeperBoard]: the number of a cell with lock threshold T is not used while fewer
  * than T cells are revealed, a zero on such a cell does not spread, and when the count reaches T a
- * revealed zero spreads at once. Its constraint joins the rules from then on.
+ * revealed zero spreads at once. Its constraint joins the rules from then on. Without lock regions the
+ * count is that of the whole board; with them ([load]) it is that of the lock's own region.
  *
  * The instance can be reused: [load] starts over with a new layout. [moveMine] changes the layout under
  * unknown cells while keeping everything deduced so far, which lets a generator repair a layout and
@@ -89,9 +90,15 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
     /** Per cell: revealed cells needed before its number is used, 0 without a lock. */
     private val lockThreshold = IntArray(cellCount)
 
-    /** Lock cells by rising threshold; those before [nextLock] are open. */
+    /** Lock cells by rising threshold; without lock regions, those before [nextLock] are open. */
     private var lockOrder = IntArray(0)
     private var nextLock = 0
+
+    /** Per cell: region counted by the locks in it, -1 outside such regions; null: whole board. */
+    private var lockRegion: IntArray? = null
+
+    /** Revealed cells per counted region, indexed by region (regions are below [cellCount]). */
+    private val regionRevealed = IntArray(cellCount)
 
     /** Stamps for the unknown cells of the first constraint of a pair and for its partners. */
     private val markA = IntArray(cellCount)
@@ -130,8 +137,18 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
 
     fun isPresent(cell: Int): Boolean = present[cell]
 
-    /** True when the number of [cell] may be used: it has no lock or enough cells are revealed. */
-    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= revealedCount
+    /**
+     * True when the number of [cell] may be used: it has no lock or enough cells are revealed, on the
+     * whole board or in its lock region (see [load]).
+     */
+    fun isLockOpen(cell: Int): Boolean = lockThreshold[cell] <= lockCounted(cell)
+
+    /** Revealed cells the lock of [cell] counts: the whole board, or its lock region. */
+    private fun lockCounted(cell: Int): Int {
+        val regions = lockRegion ?: return revealedCount
+        val region = regions[cell]
+        return if (region >= 0) regionRevealed[region] else revealedCount
+    }
 
     /** Number shown on [cell] once revealed: mines in its list. */
     fun number(cell: Int): Int = number[cell]
@@ -144,11 +161,24 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
 
     /**
      * Starts over with the layout [mines] (true = mine) and the locks [lockThresholds] (per cell, 0 =
-     * no lock; null = no locks); every present cell becomes unknown.
+     * no lock; null = no locks); every present cell becomes unknown. [lockRegions] has the meaning of
+     * the same argument of [MinesweeperBoard]: per cell the region counted by the locks in it, or -1;
+     * null makes every lock count the whole board.
      */
-    fun load(mines: BooleanArray, lockThresholds: IntArray? = null) {
+    fun load(mines: BooleanArray, lockThresholds: IntArray? = null, lockRegions: IntArray? = null) {
         require(mines.size == cellCount) { "layout has ${mines.size} cells, expected $cellCount" }
         require(lockThresholds == null || lockThresholds.size == cellCount) { "lock thresholds need $cellCount cells" }
+        require(lockRegions == null || lockRegions.size == cellCount) { "lock regions need $cellCount cells" }
+        if (lockRegions != null) {
+            for (cell in 0 until cellCount) {
+                val region = lockRegions[cell]
+                require(region in -1 until cellCount) { "cell $cell has lock region $region" }
+                require(region < 0 || present[cell]) { "cell $cell is not present but has a lock region" }
+                require((lockThresholds?.get(cell) ?: 0) == 0 || region >= 0) { "lock cell $cell has no lock region" }
+            }
+        }
+        lockRegion = lockRegions?.copyOf()
+        regionRevealed.fill(0)
         var count = 0
         var locks = 0
         for (cell in 0 until cellCount) {
@@ -224,7 +254,8 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
     /**
      * Moves the mine under unknown cell [from] to unknown safe cell [to]. Knowledge stays valid
      * because both cells are unknown; numbers of revealed cells around them change and those cells
-     * are queued again.
+     * are queued again. Lock thresholds stay as loaded; a caller whose thresholds follow the mines
+     * loads the layout again to count them anew.
      */
     fun moveMine(from: Int, to: Int) {
         require(state[from] == UNKNOWN && state[to] == UNKNOWN) { "cells $from, $to must be unknown" }
@@ -381,12 +412,27 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
             if (state[w] == REVEALED) enqueue(w)
         }
         if (unknownIn[cell] > 0) enqueue(cell)
-        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
-            val opened = lockOrder[nextLock++]
-            if (state[opened] != REVEALED) continue
-            if (unknownIn[opened] > 0) enqueue(opened)
-            if (number[opened] == 0) floodStack[floodTop++] = opened
+        val regions = lockRegion
+        if (regions != null) {
+            val region = regions[cell]
+            if (region < 0) return
+            val count = ++regionRevealed[region]
+            // Counts grow by one, so a lock opens exactly when its region's count equals its threshold.
+            for (opened in lockOrder) {
+                if (regions[opened] == region && lockThreshold[opened] == count) open(opened)
+            }
+            return
         }
+        while (nextLock < lockOrder.size && lockThreshold[lockOrder[nextLock]] <= revealedCount) {
+            open(lockOrder[nextLock++])
+        }
+    }
+
+    /** The lock of [opened] has just opened during [flood]: its constraint joins and a revealed zero spreads. */
+    private fun open(opened: Int) {
+        if (state[opened] != REVEALED) return
+        if (unknownIn[opened] > 0) enqueue(opened)
+        if (number[opened] == 0) floodStack[floodTop++] = opened
     }
 
     private fun markMine(cell: Int) {
@@ -458,8 +504,8 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
         private const val ABSENT: Byte = 3
 
         /**
-         * Solves [mines] on [neighbors] from the revealed [start]; true if no guess is needed. [present]
-         * and [lockThresholds] are as in the constructor and [load].
+         * Solves [mines] on [neighbors] from the revealed [start]; true if no guess is needed. [present],
+         * [lockThresholds] and [lockRegions] are as in the constructor and [load].
          */
         fun solves(
             neighbors: Array<IntArray>,
@@ -467,9 +513,10 @@ class LogicSolver(val neighbors: Array<IntArray>, present: BooleanArray? = null)
             start: Int,
             present: BooleanArray? = null,
             lockThresholds: IntArray? = null,
+            lockRegions: IntArray? = null,
         ): Boolean {
             val solver = LogicSolver(neighbors, present)
-            solver.load(mines, lockThresholds)
+            solver.load(mines, lockThresholds, lockRegions)
             solver.reveal(start)
             return solver.run()
         }

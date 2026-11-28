@@ -208,13 +208,24 @@ class CampaignTest {
             val level = Campaign.buildLevel(spec, geometry(spec.frequency))
             val layout = level.layout
 
-            assertTrue("$label wall count", layout.walls.size <= spec.walls)
-            if (spec.walls > 0) assertTrue("$label has walls", layout.walls.isNotEmpty())
-            for (wall in layout.walls) {
+            // Walls between rooms are part of layout.walls; the open walls are the rest.
+            val open = openWalls(geometry(spec.frequency), layout)
+            assertEquals("$label rooms", spec.rooms > 1, layout.hasRooms)
+            if (spec.rooms == 0) assertEquals("$label only open walls", layout.walls.size, open.size)
+            if (layout.hasRooms) assertTrue("$label room walls", layout.walls.size > open.size)
+            assertTrue("$label open wall count", open.size <= spec.walls)
+            if (spec.walls > 0) assertTrue("$label has open walls", open.isNotEmpty())
+            for (wall in open) {
                 assertTrue("$label wall length", wall.size - 1 in spec.wallMinLength..spec.wallMaxLength)
             }
             assertEquals("$label far cells", spec.farCells, layout.farCount)
-            assertEquals("$label line cells", spec.lineCells, layout.lineCount)
+            // With rooms line cells and locks stand only at passages: at least one, never more than asked.
+            if (spec.rooms == 0) {
+                assertEquals("$label line cells", spec.lineCells, layout.lineCount)
+            } else {
+                val lineRange = if (spec.lineCells > 0) 1..spec.lineCells else 0..0
+                assertTrue("$label line cells ${layout.lineCount}", layout.lineCount in lineRange)
+            }
             assertEquals("$label islands", maxOf(1, spec.islands), layout.islandCount)
             assertEquals("$label portal pairs", maxOf(0, spec.islands - 1) + spec.portals, layout.portalPairCount)
             if (spec.islands == 0) assertEquals("$label no ocean", layout.scopes.size, layout.presentCount)
@@ -232,7 +243,12 @@ class CampaignTest {
             assertEquals("$label start shows 0", 0, board.adjacentMines(level.start))
             for (cell in level.mines) assertTrue("$label mine $cell", board.isMine(cell))
             assertEquals("$label present cells", layout.presentCount, board.presentCount)
-            assertEquals("$label locks", spec.locks, board.lockCount)
+            if (spec.rooms == 0) {
+                assertEquals("$label locks", spec.locks, board.lockCount)
+            } else {
+                val lockRange = if (spec.locks > 0) 1..spec.locks else 0..0
+                assertTrue("$label locks ${board.lockCount}", board.lockCount in lockRange)
+            }
             val locks = IntArray(layout.scopes.size) { board.lockThreshold(it) }
             for (cell in 0 until layout.scopes.size) {
                 assertEquals("$label presence $cell", layout.isPresent(cell), board.isPresent(cell))
@@ -240,10 +256,17 @@ class CampaignTest {
                 if (layout.isPortal(cell)) assertFalse("$label mine on portal $cell", board.isMine(cell))
             }
 
+            // The regions the locks count, as the generator returned them for this board.
+            val generated = generateAgain(spec, geometry(spec.frequency))
+            assertEquals("$label generated start", level.start, generated.start)
+            assertArrayEquals("$label generated mines", level.mines, generated.mines)
+            assertArrayEquals("$label generated locks", generated.lockThresholds, locks)
+            assertEquals("$label lock regions", layout.hasRooms && spec.locks > 0, generated.lockRegions != null)
+
             val mines = BooleanArray(layout.scopes.size)
             for (cell in level.mines) mines[cell] = true
             val solver = LogicSolver(layout.scopes, layout.presentMask())
-            solver.load(mines, locks)
+            solver.load(mines, locks, generated.lockRegions)
             solver.reveal(level.start)
             assertTrue("$label solvable without guessing", solver.run())
         }
@@ -296,6 +319,45 @@ class CampaignTest {
         assertEquals(0.0, ramp.at(1.0), 1e-9)
         assertEquals(0.0, ramp.at(2.0), 1e-9)
         assertEquals(4.0, Ramp(4.0).at(0.7), 1e-9)
+    }
+
+    /**
+     * Repeats the draws of [Campaign.buildLevel] for [spec] and returns what [NoGuessGenerator] gave,
+     * which carries the lock regions that [PreparedLevel] does not keep.
+     */
+    private fun generateAgain(spec: LevelSpec, geometry: SphereGeometry): NoGuessLayout {
+        val random = StableRandom(spec.seed)
+        val layout = BoardLayout.generate(
+            geometry, spec.walls, spec.wallMinLength, spec.wallMaxLength, spec.farCells, random, spec.lineCells,
+            spec.islands, spec.portals, spec.rooms,
+        )
+        return NoGuessGenerator.generate(layout, Campaign.mineCount(spec, layout), random, spec.locks)
+    }
+
+    /**
+     * Walls of [layout] that are not walls between rooms: the two cells across their first edge lie in
+     * the same region. Walls between rooms always separate two regions, open walls never do.
+     */
+    private fun openWalls(geometry: SphereGeometry, layout: BoardLayout): List<IntArray> {
+        val across = HashMap<Pair<Int, Int>, Pair<Int, Int>>()
+        for (cell in 0 until geometry.cellCount) {
+            val start = geometry.cornerStart[cell]
+            val end = geometry.cornerStart[cell + 1]
+            for (k in start until end) {
+                val next = if (k + 1 < end) k + 1 else start
+                across[pointPair(geometry, k, next)] = Pair(cell, geometry.edgeNeighbor[k])
+            }
+        }
+        return layout.walls.filter { wall ->
+            val (a, b) = across.getValue(pointPair(geometry, wall[0], wall[1]))
+            layout.regionOf(a) == layout.regionOf(b)
+        }
+    }
+
+    private fun pointPair(geometry: SphereGeometry, cornerA: Int, cornerB: Int): Pair<Int, Int> {
+        val a = geometry.cornerPoint[cornerA]
+        val b = geometry.cornerPoint[cornerB]
+        return Pair(minOf(a, b), maxOf(a, b))
     }
 
     private companion object {
