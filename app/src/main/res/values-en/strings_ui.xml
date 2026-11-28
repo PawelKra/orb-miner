@@ -46,8 +46,9 @@
     <string name="theme_zmierzch">Dusk</string>
     <string name="theme_kosmos">Space</string>
 
-    <string name="hint_double_tap">Tap to reveal · double tap to flag · drag to rotate</string>
-    <string name="hint_long_press">Tap to reveal · hold to flag · drag to rotate</string>
+    <string name="hint_double_tap">Tap: reveal, twice: flag · hold a number: flags around it</string>
+    <string name="hint_long_press">Tap: reveal · hold a cell: flag, a number: flags around it</string>
+    <string name="hint_far_scope">tap a gold ring: its range</string>
 
     <string name="hud_mines_remaining">Mines remaining: %1$d</string>
     <string name="hud_lives_remaining">Lives remaining: %1$d</string>
@@ -77,7 +78,7 @@
     <string name="branch_lines">Lines</string>
     <string name="branch_mixed">Mixed</string>
     <string name="branch_portals">Portals</string>
-    <string name="branch_locks">Locks</string>
+    <string name="branch_locks">Padlocks</string>
     <string name="branch_islands">Islands</string>
     <string name="campaign_fraction">%1$d/%2$d</string>
     <string name="campaign_branch_progress_desc">%1$s, levels completed: %2$d of %3$d</string>
@@ -102,4 +103,35 @@
     <string name="result_new_star_record">New star record!</string>
 
     <string name="loading">Building the sphere…</string>
+
+    <string name="how_to_title">How to play</string>
+    <string name="how_to_card_subtitle">Rules and what the cell marks mean</string>
+    <string name="how_to_goal_title">The goal</string>
+    <string name="how_to_goal">The board is a ball of hexagons and 12 pentagons. Turn it with your finger and reveal every cell without a mine. The game starts with a start area already revealed. Every board can be solved by logic from there, so you never have to guess. The pictures below also show mines, which stay hidden in the game.</string>
+    <string name="how_to_number_title">Number</string>
+    <string name="how_to_number">A number on a revealed cell tells how many mines are among its neighbours. In the picture, two mines touch the cell with the 2.</string>
+    <string name="how_to_flag_title">Flag</string>
+    <string name="how_to_flag">A flag marks a cell you think holds a mine. Double tap a covered cell to place or remove a flag. If you turn on “Flag by long press” in the settings, hold the cell instead. Hold a revealed number to flag the covered cells around it when all of them must be mines.</string>
+    <string name="how_to_wall_title">Wall</string>
+    <string name="how_to_wall">Cells on the two sides of a wall do not see each other. A number does not count a mine behind a wall, and reveals do not spread through it. In the picture, the 1 counts only the mine above it.</string>
+    <string name="how_to_passage_title">Passage</string>
+    <string name="how_to_passage">Walls split the board into rooms. Two neighbouring rooms share at most one gap, one edge wide. Cells in different rooms see each other only through such a gap or through a portal. Reveals pass between rooms the same way.</string>
+    <string name="how_to_far_title">Far cell</string>
+    <string name="how_to_far">A gold ring marks a far cell. Its number counts the mines up to two steps away, not just its neighbours. A wall blocks this view and a portal carries it across. Tap a revealed far cell and the ball highlights its range. If you turn on “Flag by long press” in the settings and the flags and exploded mines in the range already match the number, the tap reveals the rest of the range instead, if anything is left to reveal.</string>
+    <string name="how_to_line_title">Line cell</string>
+    <string name="how_to_line">A turquoise number with an arrow counts the mines in a straight row of cells in the direction of the arrow, not its neighbours. The row ends at a wall, the coast, a pentagon or its length limit. A line cell at a passage sends its row through the passage into the next room, so it helps you get in.</string>
+    <string name="how_to_portal_title">Portal</string>
+    <string name="how_to_portal">Two distant cells with a mark in the same colour are neighbours of each other. The number of one counts the other, and a zero spreads through the pair. Portal cells never hold a mine.</string>
+    <string name="how_to_lock_title">Padlock</string>
+    <string name="how_to_lock">A padlock hides the number of its cell. It stands at the exit of its room, next to the passage or portal leading on, and never holds a mine. Its counter shows how many cells of its own room are still to reveal. Once you solve that room, the number shows with a small open padlock and helps you into the next room.</string>
+    <string name="how_to_island_title">Island and ocean</string>
+    <string name="how_to_island">Part of the ball can be ocean with no cells. The land then splits into islands, joined only by portals.</string>
+
+    <string name="feature_card_new">New</string>
+    <string name="feature_card_board">On this board</string>
+    <string name="feature_card_counter">%1$d/%2$d</string>
+    <string name="feature_card_counter_desc">Card %1$d of %2$d</string>
+    <string name="feature_card_next">Next</string>
+    <string name="feature_card_ok">OK</string>
+    <string name="action_feature_help">Explain the cells of this board</string>
 </resources>

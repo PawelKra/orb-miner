@@ -12,6 +12,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.AndroidViewModel
 import com.example.spheresweeper.data.GamePreferences
+import com.example.spheresweeper.logic.BoardFeature
+import com.example.spheresweeper.logic.BoardFeatures
 import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.Campaign
@@ -26,6 +28,7 @@ import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import com.example.spheresweeper.ui.theme.GameTheme
 import com.example.spheresweeper.ui.theme.GameThemes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,7 +40,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.acos
 import kotlin.math.sqrt
 
-enum class Screen { MENU, CAMPAIGN, GAME }
+enum class Screen { MENU, CAMPAIGN, GAME, HOW_TO }
 
 /**
  * What the current game is played on: a free game on a [BoardSize] or a fixed campaign level.
@@ -69,6 +72,15 @@ sealed class GameConfig {
         override val lives: Int get() = spec.lives
         override val hints: Int get() = spec.hints
     }
+}
+
+/**
+ * Feature cards shown over the board, one at a time: [features] in order, [index] the one on screen.
+ * [intro] cards introduce features the player has not seen yet, and closing one marks its feature as
+ * seen. Cards opened from the HUD ([intro] false) leave the seen features as they are.
+ */
+data class FeatureCards(val features: List<BoardFeature>, val index: Int, val intro: Boolean) {
+    val current: BoardFeature get() = features[index]
 }
 
 /**
@@ -117,7 +129,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     /**
-     * False until the player's first move in this game (reveal, flag, chord or hint). The game opens
+     * False until the player's first move in this game (reveal, flag, auto flag, chord or hint). The game opens
      * on a start area already revealed, so the status is PLAYING before that; the help line stays
      * and the timer waits until the player acts.
      */
@@ -159,6 +171,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var effectCell by mutableIntStateOf(-1)
         private set
 
+    /**
+     * Revealed far cell whose scope the ball highlights, -1 for none. A tap on it sets it (see
+     * [singleTap] and [tapImmediate]). The next move, a tap on another cell, a new board and the end
+     * of the game clear it; turning and zooming the ball keep it.
+     */
+    var highlightCell by mutableIntStateOf(-1)
+        private set
+
     var flagByLongPress by mutableStateOf(prefs.flagByLongPress)
         private set
 
@@ -181,7 +201,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var lastRecord by mutableStateOf<RecordResult?>(null)
         private set
 
+    /** Features of the current board, in [BoardFeature] order; empty while no board exists. */
+    var boardFeatures by mutableStateOf<List<BoardFeature>>(emptyList())
+        private set
+
+    /** Feature cards on screen, or null. While they are open the board takes no moves and the timer stands. */
+    var featureCards by mutableStateOf<FeatureCards?>(null)
+        private set
+
+    /** Start cell of the current board, pulsed once the board is in view; -1 while no board exists. */
+    private var startCell = -1
+
+    /** Features whose introduction card the player has closed. */
+    private var seenFeatures: Set<BoardFeature> = prefs.seenFeatures
+
     private var timerStartRealtime = 0L
+
+    /** elapsedRealtime when feature cards paused the running timer; 0 while it is not paused. */
+    private var pausedAtRealtime = 0L
 
     /** Current status; reading it subscribes the caller to board changes. */
     val status: GameStatus
@@ -224,48 +261,103 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         start(GameConfig.Level(level))
     }
 
-    /** Starts the level after the current one, if it is open. */
+    /**
+     * Starts the level after the current one, if it is open. The finished board stays in view until
+     * the next one is ready; taps while it loads are ignored, so a double tap never skips a level.
+     */
     fun startNextLevel() {
-        nextLevel?.let { startLevel(it) }
+        if (loading || screen != Screen.GAME) return
+        val next = nextLevel ?: return
+        start(GameConfig.Level(next), keepBoard = board != null)
     }
 
-    private fun start(newConfig: GameConfig) {
+    /**
+     * Shows the game screen and loads a game for [newConfig]. With [keepBoard] the board on screen
+     * stays in view until the new one is ready (see [loadGame]); a game started from the menu or the
+     * campaign map clears it, since it belongs to a game the player has left.
+     */
+    private fun start(newConfig: GameConfig, keepBoard: Boolean = false) {
         config = newConfig
         screen = Screen.GAME
         zoom = 1f
         lastRecord = null
-        val cached = geometryCache[newConfig.frequency]
+        loadGame(keepBoard)
+    }
+
+    /**
+     * New board for the same config; a campaign level comes back exactly as it was. The current board
+     * stays in view until the new one is ready.
+     */
+    fun restart() {
+        if (geometry != null) loadGame(keepBoard = board != null)
+    }
+
+    /** True while [loadGame] builds the next game; a board still in view then takes no moves. */
+    private val loading: Boolean get() = loadJob?.isActive == true
+
+    /**
+     * Replaces the current game with a new one for [config], generated off the main thread. While it
+     * loads, the timer stands and no move, hint or card applies.
+     *
+     * With [keepBoard] the board, its layout and geometry stay in view, frozen, so a quick load swaps
+     * the boards without a loading text in between. Only when the load takes longer than
+     * [LOADING_TEXT_DELAY_MILLIS] is the board cleared, and the game screen shows its loading text.
+     * Without [keepBoard] the board is cleared at once.
+     *
+     * The geometry comes from [geometryCache] or is built together with the game. A newer call, or
+     * leaving the game, cancels a load still running, and its result is dropped; a result for a
+     * config that is no longer current is dropped too.
+     */
+    private fun loadGame(keepBoard: Boolean) {
+        val forConfig = config
+        val cached = geometryCache[forConfig.frequency]
         loadJob?.cancel()
-        if (cached != null) {
-            geometry = cached
-            newBoard()
-        } else {
-            geometry = null
-            board = null
-            layout = null
-            stopTimer()
-            loadJob = scope.launch {
-                // The first game is generated together with the geometry, off the main thread.
-                val (built, game) = withContext(Dispatchers.Default) {
-                    val g = SphereGeometry.build(newConfig.frequency)
-                    g to prepareGame(g, newConfig)
+        stopTimer()
+        featureCards = null
+        highlightCell = -1
+        startCell = -1
+        pausedAtRealtime = 0L
+        if (!keepBoard) clearBoard(cached)
+        loadJob = scope.launch {
+            // A child of the load: cancelled with it, or once the new game is ready.
+            val slow = if (keepBoard) {
+                launch {
+                    delay(LOADING_TEXT_DELAY_MILLIS)
+                    clearBoard(cached)
                 }
-                geometryCache[newConfig.frequency] = built
-                if (config == newConfig) {
-                    geometry = built
-                    newBoard(game)
-                }
+            } else {
+                null
+            }
+            // withContext drops the result once this job is cancelled, so a newer load always wins.
+            val (built, game) = withContext(Dispatchers.Default) {
+                val g = cached ?: SphereGeometry.build(forConfig.frequency)
+                g to prepareGame(g, forConfig)
+            }
+            slow?.cancel()
+            geometryCache[forConfig.frequency] = built
+            if (config == forConfig) {
+                geometry = built
+                newBoard(game)
             }
         }
     }
 
-    /** New board for the same config; a campaign level comes back exactly as it was. */
-    fun restart() {
-        if (geometry != null) newBoard()
+    /** Removes the board from view, so the game screen shows its loading text; [g] may be null. */
+    private fun clearBoard(g: SphereGeometry?) {
+        geometry = g
+        board = null
+        layout = null
+        boardFeatures = emptyList()
+        highlightCell = -1
     }
 
     fun openCampaign() {
         screen = Screen.CAMPAIGN
+    }
+
+    /** Opens the legend of cell marks and rules; back returns to the menu through [backToMenu]. */
+    fun openHowTo() {
+        screen = Screen.HOW_TO
     }
 
     fun backToMenu() {
@@ -302,6 +394,38 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         prefs.themeId = value.id
     }
 
+    // ---------------------------------------------------------------- feature cards
+
+    /**
+     * Opens the cards of every feature of the current board, seen before or not, and pauses a running
+     * timer. Does nothing when the board has no features or cards are already open.
+     */
+    fun openFeatureHelp() {
+        if (screen != Screen.GAME || loading || featureCards != null || boardFeatures.isEmpty()) return
+        featureCards = FeatureCards(boardFeatures, 0, intro = false)
+        pauseTimer()
+    }
+
+    /**
+     * Closes the card on screen and shows the next one. Closing an intro card stores its feature as
+     * seen. After the last card the board takes moves again and a paused timer goes on. Closing the
+     * last intro card pulses the start cell, which the cards covered when the board appeared.
+     */
+    fun closeFeatureCard() {
+        val cards = featureCards ?: return
+        if (cards.intro && cards.current !in seenFeatures) {
+            seenFeatures = seenFeatures + cards.current
+            prefs.seenFeatures = seenFeatures
+        }
+        if (cards.index + 1 < cards.features.size) {
+            featureCards = cards.copy(index = cards.index + 1)
+        } else {
+            featureCards = null
+            resumeTimer()
+            if (cards.intro && startCell >= 0) startEffect(SphereEffect.HINT, startCell)
+        }
+    }
+
     // ---------------------------------------------------------------- view
 
     fun notifyOrientationChanged() {
@@ -314,27 +438,58 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------------------------------------------------------------- moves
 
-    /** Plain reveal (delayed single tap, or the first tap of a broken double tap). */
-    fun reveal(cell: Int, forGame: Int): Feedback {
+    /**
+     * Single tap in double-tap mode (delayed, or the first tap of a broken double tap). On a revealed
+     * far cell it only switches the highlight of its scope on or off (see [highlightCell]). On any
+     * other cell it clears the highlight and reveals the cell if it is covered.
+     */
+    fun singleTap(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
+        if (b.isRevealed(cell) && isFarCell(cell)) {
+            toggleHighlight(cell)
+            return Feedback.NONE
+        }
+        highlightCell = -1
         return afterMove(b.reveal(cell), Feedback.NONE)
     }
 
-    /** Double tap: flag a covered cell, chord a revealed number. */
+    /**
+     * Double tap: flag a covered cell, chord a revealed number. A double tap on another cell than the
+     * highlighted one clears the highlight; on the highlighted cell only a chord that acts clears it.
+     */
     fun doubleTap(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
+        if (cell != highlightCell) highlightCell = -1
         return if (b.isRevealed(cell)) chordOn(b, cell) else toggleFlagOn(b, cell)
     }
 
-    /** Long press in long-press mode: toggle the flag of a covered cell. */
+    /**
+     * Long press, in both modes. On a revealed number it flags every covered cell of its scope when
+     * they must all be mines ([MinesweeperBoard.autoFlagCells]); otherwise nothing changes and the
+     * result is [Feedback.REJECT], also for a closed lock. A revealed 0 is ignored without feedback.
+     * On a covered cell it toggles the flag in long-press mode and does nothing in double-tap mode.
+     */
     fun longPress(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
-        return if (b.isRevealed(cell)) Feedback.NONE else toggleFlagOn(b, cell)
+        if (b.isRevealed(cell)) return autoFlagOn(b, cell)
+        return if (flagByLongPress) toggleFlagOn(b, cell) else Feedback.NONE
     }
 
-    /** Immediate tap in long-press mode: reveal a covered cell, chord a revealed number. */
+    /**
+     * Immediate tap in long-press mode: reveal a covered cell, chord a revealed number.
+     *
+     * A revealed far cell chords only when the chord would reveal something ([MinesweeperBoard.canChord]:
+     * as many known mines in its scope as its number and at least one covered cell without a flag).
+     * Otherwise the tap switches the highlight of its scope on or off, like [singleTap] does. A tap on
+     * any other cell clears the highlight.
+     */
     fun tapImmediate(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
+        if (b.isRevealed(cell) && isFarCell(cell) && !b.canChord(cell)) {
+            toggleHighlight(cell)
+            return Feedback.NONE
+        }
+        if (cell != highlightCell) highlightCell = -1
         return if (b.isRevealed(cell)) chordOn(b, cell) else afterMove(b.reveal(cell), Feedback.NONE)
     }
 
@@ -346,6 +501,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val b = board ?: return Feedback.NONE
         val g = geometry ?: return Feedback.NONE
         if (screen != Screen.GAME || b.status != GameStatus.PLAYING || hintsLeft <= 0) return Feedback.NONE
+        if (loading || featureCards != null) return Feedback.NONE
         val cell = pickHintCell(b, g)
         if (cell < 0) return Feedback.NONE
         hintsLeft--
@@ -416,11 +572,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * The board a move on [cell] applies to, or null when the move must be ignored: another screen or
-     * game, a finished game, or a cell that is not in play (out of range or ocean).
+     * game, a board kept in view while the next one loads, a finished game, open feature cards, or a
+     * cell that is not in play (out of range or ocean).
      */
     private fun activeBoard(cell: Int, forGame: Int): MinesweeperBoard? {
         val b = board ?: return null
-        if (screen != Screen.GAME || forGame != gameId) return null
+        if (screen != Screen.GAME || forGame != gameId || loading || featureCards != null) return null
         if (cell < 0 || cell >= b.cellCount || !b.isPresent(cell)) return null
         if (b.status == GameStatus.WON || b.status == GameStatus.LOST) return null
         return b
@@ -431,6 +588,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         onPlayerMove()
         boardVersion++
         return Feedback.FLAG
+    }
+
+    /** Flags the cells [MinesweeperBoard.autoFlagCells] finds around the revealed [cell]; see [longPress]. */
+    private fun autoFlagOn(b: MinesweeperBoard, cell: Int): Feedback {
+        if (b.isLockOpen(cell) && b.adjacentMines(cell) == 0) return Feedback.NONE
+        val cells = b.autoFlagCells(cell)
+        if (cells == null || cells.isEmpty()) return Feedback.REJECT
+        for (target in cells) b.toggleFlag(target)
+        onPlayerMove()
+        boardVersion++
+        return Feedback.FLAG
+    }
+
+    private fun isFarCell(cell: Int): Boolean = layout?.isFar(cell) == true
+
+    /** Highlights the scope of the far [cell], or clears the highlight when it is already on [cell]. */
+    private fun toggleHighlight(cell: Int) {
+        highlightCell = if (highlightCell == cell) -1 else cell
     }
 
     private fun chordOn(b: MinesweeperBoard, cell: Int): Feedback {
@@ -461,8 +636,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Marks that the player has acted in this game; the first move starts the timer. */
+    /** Marks that the player has acted in this game; the first move starts the timer and clears the highlight. */
     private fun onPlayerMove() {
+        highlightCell = -1
         playerMoved = true
         if (timerStartRealtime == 0L) startTimer()
     }
@@ -476,26 +652,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * Builds a game for [forConfig] on [g] (which has its frequency) without touching view-model
      * state, so it can run on any thread. Mines come from [NoGuessGenerator], which guarantees that
      * the whole board can be solved from the start cell by logic alone, and the start cell is
-     * revealed right away. A free game draws a new board every time, with the ocean, portals and locks
-     * of its [BoardSize] and the size's mine density on the drawn land ([BoardSize.minesFor]); a level
-     * is built from its seed.
+     * revealed right away. A free game draws a new board every time, with the ocean, rooms, portals and
+     * locks of its [BoardSize] and the size's mine density on the drawn land ([BoardSize.minesFor]); a
+     * level is built from its seed.
      */
     private fun prepareGame(g: SphereGeometry, forConfig: GameConfig): PreparedGame = when (forConfig) {
-        is GameConfig.Free -> {
-            val size = forConfig.size
-            val newLayout = BoardLayout.generate(
-                g, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells,
-                lineCount = size.lineCells, islandCount = size.islands, portalCount = size.portals,
-            )
-            val mines = size.minesFor(newLayout)
-            val generated = NoGuessGenerator.generate(newLayout, mines, lockCount = size.locks)
-            val started = MinesweeperBoard(
-                newLayout.scopes, mines, lives = size.lives,
-                present = newLayout.presentMask(), lockThresholds = generated.lockThresholds,
-            )
-            started.startWith(generated.mines, generated.start)
-            PreparedGame(newLayout, started, generated.start)
-        }
+        is GameConfig.Free -> prepareRandomGame(g, forConfig.size)
         is GameConfig.Level -> {
             val level = Campaign.buildLevel(forConfig.spec, g)
             PreparedGame(level.layout, level.board, level.start)
@@ -503,14 +665,59 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Shows a new game: [prepared] if given (built for the current [geometry] and [config]),
-     * otherwise one generated here. Board and [gameId] change together, so moves meant for the old
-     * board are ignored. The ball turns at once so the start cell faces the player, and a hint pulse
-     * marks it.
+     * A free game of [size] on [g], drawn with fresh randomness on every attempt. Both generators can
+     * fail on a rare draw: [BoardLayout.generate] when an island cannot be split into the asked rooms or
+     * no portal fits, [NoGuessGenerator.generate] when it runs out of layouts. A new draw almost always
+     * succeeds, so a failure is retried up to [RANDOM_GAME_ATTEMPTS] times. Rooms cause most of these
+     * failures, so after that the game is drawn without rooms (the size's walls, ocean, portals and
+     * locks stay; the locks then count the whole board), again with up to [RANDOM_GAME_ATTEMPTS] draws.
+     * Only a size that fails every draw, which points to a broken [BoardSize], passes the last error
+     * on. Campaign levels never come here: they are built from fixed seeds that the tests cover.
      */
-    private fun newBoard(prepared: PreparedGame? = null) {
+    private fun prepareRandomGame(g: SphereGeometry, size: BoardSize): PreparedGame {
+        var failure: RuntimeException? = null
+        for (attempt in 0 until 2 * RANDOM_GAME_ATTEMPTS) {
+            val roomCount = if (attempt < RANDOM_GAME_ATTEMPTS) size.rooms else 0
+            try {
+                return drawRandomGame(g, size, roomCount)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IllegalStateException) {
+                failure = e
+            } catch (e: IllegalArgumentException) {
+                failure = e
+            }
+        }
+        throw checkNotNull(failure)
+    }
+
+    /** One draw of a free game of [size] on [g] with [roomCount] rooms; throws when a generator fails. */
+    private fun drawRandomGame(g: SphereGeometry, size: BoardSize, roomCount: Int): PreparedGame {
+        val newLayout = BoardLayout.generate(
+            g, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells,
+            lineCount = size.lineCells, islandCount = size.islands, portalCount = size.portals,
+            roomCount = roomCount,
+        )
+        val mines = size.minesFor(newLayout)
+        val generated = NoGuessGenerator.generate(newLayout, mines, lockCount = size.locks)
+        val started = MinesweeperBoard(
+            newLayout.scopes, mines, lives = size.lives,
+            present = newLayout.presentMask(), lockThresholds = generated.lockThresholds,
+            lockRegions = generated.lockRegions,
+        )
+        started.startWith(generated.mines, generated.start)
+        return PreparedGame(newLayout, started, generated.start)
+    }
+
+    /**
+     * Shows [game], built off the main thread by [loadGame] for the current [geometry] and [config].
+     * Board and [gameId] change together, so moves meant for the old board are ignored. The ball
+     * turns at once so the start cell faces the player, and a hint pulse marks it. Features of the
+     * board the player has not seen yet open their intro cards, in [BoardFeature] order, before the
+     * first move; the pulse then waits until the last card closes.
+     */
+    private fun newBoard(game: PreparedGame) {
         val g = geometry ?: return
-        val game = prepared ?: prepareGame(g, config)
         stopTimer()
         timerStartRealtime = 0L
         elapsedSeconds = 0L
@@ -521,15 +728,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         hintsLeft = config.hints
         layout = game.layout
         board = game.board
+        highlightCell = -1
+        pausedAtRealtime = 0L
+        val features = BoardFeatures.of(game.layout, game.board).toList()
+        boardFeatures = features
+        val pendingIntro = features.filter { it !in seenFeatures }
+        featureCards = if (pendingIntro.isEmpty()) null else FeatureCards(pendingIntro, 0, intro = true)
         gameId++
         boardVersion++
+        startCell = game.start
         focusOn(g, game.start, animate = false)
-        startEffect(SphereEffect.HINT, game.start)
+        if (featureCards == null) {
+            startEffect(SphereEffect.HINT, game.start)
+        } else {
+            startEffect(SphereEffect.NONE, -1)
+        }
     }
 
     private fun startTimer() {
         timerStartRealtime = SystemClock.elapsedRealtime()
         elapsedSeconds = 0L
+        launchTicker()
+    }
+
+    private fun launchTicker() {
         tickerJob?.cancel()
         tickerJob = scope.launch {
             while (true) {
@@ -545,8 +767,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         tickerJob = null
     }
 
+    /** Stops a running timer so that the time until [resumeTimer] does not count. */
+    private fun pauseTimer() {
+        if (tickerJob == null) return
+        stopTimer()
+        pausedAtRealtime = SystemClock.elapsedRealtime()
+    }
+
+    /** Goes on with a timer stopped by [pauseTimer], leaving the paused time out. */
+    private fun resumeTimer() {
+        if (pausedAtRealtime == 0L) return
+        timerStartRealtime += SystemClock.elapsedRealtime() - pausedAtRealtime
+        pausedAtRealtime = 0L
+        launchTicker()
+    }
+
     private fun finishGame(won: Boolean) {
         stopTimer()
+        highlightCell = -1
         // At least 1 ms so that a stored best time is always a valid positive value.
         val elapsed = if (timerStartRealtime == 0L) {
             1L
@@ -600,6 +838,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         const val TICK_MILLIS = 100L
         const val FOCUS_MILLIS = 450f
         const val FRAME_MILLIS = 16L
+
+        /** How long a board kept in view may wait for the next one before the loading text replaces it. */
+        const val LOADING_TEXT_DELAY_MILLIS = 300L
+
+        /** Draws of a free game with its rooms, and then again without rooms, before giving up. */
+        const val RANDOM_GAME_ATTEMPTS = 5
 
         /** Cells closer than this to the view centre (radians) are not worth turning the ball for. */
         const val FOCUS_MIN_ANGLE = 0.35f

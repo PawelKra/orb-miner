@@ -15,11 +15,21 @@ Taki podział nazywa się wielościanem Goldberga. Liczba pól wynosi `10·n² +
 | Rozsunięcie lub zsunięcie dwóch palców | Przybliża lub oddala kulę |
 | Pojedyncze dotknięcie zakrytego pola | Odkrywa pole (z opóźnieniem ok. 250 ms, żeby odróżnić je od podwójnego dotknięcia) |
 | Podwójne dotknięcie zakrytego pola | Stawia lub zdejmuje flagę |
-| Podwójne dotknięcie odkrytej liczby | Akord: gdy liczba flag wokół pola równa się liczbie na polu, odkrywa pozostałych sąsiadów |
+| Podwójne dotknięcie odkrytej liczby | Akord: gdy flagi i trafione miny w zasięgu pola równają się jego liczbie, odkrywa pozostałe zakryte pola w zasięgu |
+| Pojedyncze dotknięcie odkrytego pola dalekiego zasięgu | Włącza lub wyłącza podświetlenie jego zasięgu na kuli |
+| Przytrzymanie odkrytej liczby przez ok. 400 ms | Gdy wszystkie zakryte pola w zasięgu muszą być minami, stawia na nich flagi. W przeciwnym razie telefon krótko wibruje |
 
-W ustawieniach możesz włączyć tryb „flaga długim przytrzymaniem”.
-Wtedy przytrzymanie pola przez ok. 400 ms stawia flagę, a pojedyncze dotknięcie odkrywa pole bez opóźnienia.
-Akord nadal działa podwójnym dotknięciem odkrytej liczby.
+Zasięg pola to pola, które liczy jego liczba.
+Podświetlenie zasięgu znika przy następnym ruchu albo po dotknięciu innego pola. Obrót i przybliżenie kuli go nie wyłączają.
+Przytrzymanie odkrytej liczby działa w obu trybach sterowania.
+
+W ustawieniach możesz włączyć tryb „Flaga przez przytrzymanie”. Wtedy:
+
+1. Pojedyncze dotknięcie zakrytego pola odkrywa je bez opóźnienia.
+2. Przytrzymanie zakrytego pola przez ok. 400 ms stawia lub zdejmuje flagę.
+3. Pojedyncze dotknięcie odkrytej liczby robi akord.
+   Na polu dalekiego zasięgu akord zachodzi tylko wtedy, gdy coś odkryje. W przeciwnym razie dotknięcie włącza lub wyłącza podświetlenie zasięgu.
+4. Podwójne dotknięcie działa jak dwa pojedyncze.
 
 Dotknięcie działa tylko na polach z przodu kuli. Ruch palca dłuższy niż próg przesunięcia to zawsze obrót, nigdy dotknięcie.
 
@@ -31,40 +41,53 @@ Dotknięcie działa tylko na polach z przodu kuli. Ruch palca dłuższy niż pr�
 3. Odkrycie pola z zerem odkrywa cały spójny obszar zer i jego obramowanie z liczbami.
 4. Wygrywasz, gdy odkryjesz wszystkie pola bez min.
 5. Ściany to świecące linie na krawędziach pól. Liczba nie liczy min po drugiej stronie ściany, a odkrywanie zer nie przechodzi przez ścianę.
-6. Pola dalekiego zasięgu mają złoty pierścień. Ich liczba liczy miny w dwóch pierścieniach sąsiadów (do 18 pól), też bez przechodzenia przez ściany.
-7. Pola liniowe mają turkusową liczbę i strzałkę przy jednym boku. Ich liczba nie liczy sąsiadów, tylko miny w prostym rzędzie pól, który biegnie od pola w stronę strzałki.
-   Rząd przechodzi przez każdy sześciokąt na wprost, z boku na bok przeciwległy. Kończy się przed ścianą, na pięciokącie albo po `2·n` polach.
+6. Pokoje to części lądu oddzielone ścianami. Dwa pokoje łączy najwyżej jedno przejście, czyli przerwa w ścianie szeroka na jedną krawędź pola.
+   Ściana między pokojami działa jak każda ściana, a przejście jak zwykła krawędź: pola po jego obu stronach są sąsiadami, a odkrywanie zer przechodzi do następnego pokoju tylko tędy.
+   Stykające się pokoje bez przejścia dzieli pełna ściana.
+7. Pola dalekiego zasięgu mają złoty pierścień. Ich liczba liczy miny w dwóch pierścieniach sąsiadów (do 18 pól), też bez przechodzenia przez ściany.
+8. Pola liniowe mają turkusową liczbę i strzałkę przy jednym boku. Ich liczba nie liczy sąsiadów, tylko miny w prostym rzędzie pól, który biegnie od pola w stronę strzałki.
+   Rząd przechodzi przez każdy sześciokąt na wprost, z boku na bok przeciwległy. Kończy się przed ścianą albo brzegiem lądu, na pięciokącie albo po `2·n` polach.
+   Na planszy z pokojami pole liniowe stoi przy przejściu, a jego rząd biegnie przez przejście w głąb następnego pokoju.
    Po odkryciu pola liniowego cienka linia pokazuje jego rząd. Zero na takim polu odkrywa cały rząd.
-8. Ocean to ciemna woda na kuli. Pola oceanu nie biorą udziału w grze: nie mają min ani liczb, nie da się ich kliknąć i żadna liczba ich nie liczy.
+9. Ocean to ciemna woda na kuli. Pola oceanu nie biorą udziału w grze: nie mają min ani liczb, nie da się ich kliknąć i żadna liczba ich nie liczy.
    Na planszy z oceanem ląd tworzy kilka wysp, a ocean zajmuje od 20 do 35% pól. Wyspy nigdy się nie stykają, łączą je tylko przeskoki.
-9. Przeskok to para odległych pól z takim samym znakiem w tym samym kolorze. Na zakrytym polu znak to pierścień z kropką, na odkrytym cienki pierścień przy brzegu.
-   Oba pola przeskoku są dla siebie dodatkowymi sąsiadami: liczba każdego z nich liczy też drugie pole pary, a odkrywanie zer przechodzi przez przeskok. Na polach przeskoków nigdy nie ma min.
-10. Pole z zamkiem pokazuje kłódkę z liczbą. Ta liczba mówi, ile pól na całej kuli musisz jeszcze odkryć, żeby zamek się otworzył.
-    Dopóki zamek jest zamknięty, odkryte pole z kłódką nie pokazuje swojej liczby, nie odkrywa sąsiednich zer i nie działa na nim akord.
-    Po otwarciu pole pokazuje zwykłą liczbę z małą otwartą kłódką. Na polach z zamkiem nigdy nie ma min.
-11. Przycisk z żarówką odkrywa bezpieczne pole przy już odkrytym obszarze i obraca kulę w jego stronę.
-12. Na większych planszach masz kilka żyć. Trafiona mina zabiera jedno życie, zostaje na kuli jako czerwone pole i liczy się jak flaga.
-13. Przegrywasz, gdy stracisz ostatnie życie. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
+10. Przeskok to para odległych pól z takim samym znakiem w tym samym kolorze. Na zakrytym polu znak to pierścień z kropką, na odkrytym cienki pierścień przy brzegu.
+    Oba pola przeskoku są dla siebie dodatkowymi sąsiadami: liczba każdego z nich liczy też drugie pole pary, a odkrywanie zer przechodzi przez przeskok. Na polach przeskoków nigdy nie ma min.
+11. Pole z kłódką ukrywa swoją liczbę. Licznik na kłódce mówi, ile pól musisz jeszcze odkryć, żeby kłódka się otworzyła.
+    Bez pokoi kłódka liczy odkryte pola na całej kuli. Na planszy z pokojami kłódka stoi przy wyjściu ze swojego pokoju, obok przejścia albo przeskoku prowadzącego dalej.
+    Liczy wtedy tylko pola swojego pokoju, więc otwiera się, gdy go rozwiążesz.
+    Dopóki kłódka jest zamknięta, odkryte pole nie pokazuje swojej liczby, nie odkrywa sąsiednich zer i nie działa na nim akord ani flagowanie przytrzymaniem.
+    Po otwarciu pole pokazuje zwykłą liczbę z małą otwartą kłódką. Na polach z kłódką nigdy nie ma min.
+12. Przycisk z żarówką odkrywa bezpieczne pole, najchętniej przy już odkrytym obszarze i z przodu kuli, a potem obraca kulę w jego stronę.
+13. Na większych planszach masz kilka żyć. Trafiona mina zabiera jedno życie, zostaje na kuli jako czerwone pole i liczy się jak flaga.
+14. Przegrywasz, gdy stracisz ostatnie życie. Gra pokazuje wtedy wszystkie miny i błędnie postawione flagi.
 
 Licznik u góry pokazuje liczbę min minus liczbę flag i trafionych min. Zegar startuje przy Twoim pierwszym ruchu: odkryciu, fladze, akordzie albo podpowiedzi.
 Cyfry obracają się razem z widokiem: ich podstawa leży zawsze na boku pola, który na ekranie jest najbardziej poziomy.
 Gra zapisuje najlepszy czas dla każdego rozmiaru planszy.
 
+## Pomoc w grze
+
+Ekran „Jak grać” w menu opisuje cel gry i każdy typ pola z rysunkiem.
+Gdy plansza pierwszy raz pokazuje typ pola, którego jeszcze nie znasz, przed pierwszym ruchem gra wyświetla jego kartę nowości. Gra zapamiętuje obejrzane karty.
+Przycisk „?” w czasie gry pokazuje karty wszystkich typów pól bieżącej planszy i na ten czas zatrzymuje zegar. Na planszy z samymi liczbami i flagami przycisku nie ma.
+
 ## Rozmiary planszy
 
-| Rozmiar | n | Pola | Miny | Życia | Podpowiedzi | Ściany (max długość) | Pola dalekiego zasięgu | Pola liniowe | Wyspy | Dodatkowe przeskoki | Zamki |
-|---------|---|------|------|-------|-------------|----------------------|------------------------|--------------|-------|---------------------|-------|
-| Tiny | 2 | 42 | 6 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| Small | 3 | 92 | 14 | 1 | 1 | 2 (4) | 3 | 2 | 0 | 0 | 0 |
-| Medium | 4 | 162 | 28 | 2 | 1 | 3 (6) | 5 | 4 | 0 | 0 | 0 |
-| Large | 5 | 252 | 45 | 3 | 2 | 4 (8) | 8 | 6 | 0 | 1 | 2 |
-| Huge | 6 | 362 | 65 | 4 | 2 | 5 (10) | 11 | 8 | 2 | 1 | 3 |
-| Giant | 8 | 642 | 125 | 5 | 3 | 7 (14) | 18 | 12 | 3 | 2 | 5 |
+| Rozmiar | n | Pola | Miny | Życia | Podpowiedzi | Ściany (max długość) | Pola dalekiego zasięgu | Pola liniowe | Wyspy | Dodatkowe przeskoki | Kłódki | Pokoje |
+|---------|---|------|------|-------|-------------|----------------------|------------------------|--------------|-------|---------------------|--------|--------|
+| Tiny | 2 | 42 | 6 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Small | 3 | 92 | 14 | 1 | 1 | 2 (4) | 3 | 2 | 0 | 0 | 0 | 3 |
+| Medium | 4 | 162 | 28 | 2 | 1 | 3 (6) | 5 | 4 | 0 | 0 | 0 | 4 |
+| Large | 5 | 252 | 45 | 3 | 2 | 4 (8) | 8 | 6 | 0 | 1 | 2 | 6 |
+| Huge | 6 | 362 | 65 | 4 | 2 | 5 (10) | 11 | 8 | 2 | 1 | 3 | 8 |
+| Giant | 8 | 642 | 125 | 5 | 3 | 7 (14) | 18 | 12 | 3 | 2 | 5 | 11 |
 
 Wyspy 0 oznaczają kulę bez oceanu. Kolumna „Pola” liczy też ocean.
 Kolumna „Miny” wyznacza gęstość min: liczbę min podzieloną przez liczbę wszystkich pól. Miny leżą tylko na lądzie.
 Na planszy z wyspami gra liczy miny od wylosowanego lądu przy tej samej gęstości. Min jest więc mniej, np. około 47 na Huge i 91 na Giant.
 Wyspy łączą przeskoki, o jedną parę mniej niż wysp. Kolumna „Dodatkowe przeskoki” podaje pary ponad te połączenia.
+Pokoje 0 oznaczają ląd bez pokoi. Z pokojami pola liniowe stoją tylko przy przejściach, a kłódki przy przejściach i przeskokach, więc gra stawia ich zwykle mniej, niż podaje tabela.
 
 Wszystkie te liczby zmienisz w jednym miejscu: `app/src/main/java/com/example/spheresweeper/logic/GameConstants.kt`.
 
@@ -73,13 +96,15 @@ Wszystkie te liczby zmienisz w jednym miejscu: `app/src/main/java/com/example/sp
 Kampania to drzewko 150 stałych poziomów. Każdy poziom ma zawsze tę samą planszę, więc możesz go powtarzać i poprawiać wynik.
 
 1. Pień „Początek” ma 10 poziomów na małych planszach, bez ścian i pól specjalnych.
-2. Po ukończeniu całego pnia otwiera się pięć gałęzi po 20 poziomów: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki” i „Zamki”.
-   Każda z nich uczy jednej mechaniki. „Przeskoki” mają od 1 do 4 par przeskoków, a „Zamki” od 1 do 6 zamków.
+2. Po ukończeniu całego pnia otwiera się pięć gałęzi po 20 poziomów: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki” i „Kłódki”.
+   Każda z nich uczy jednej mechaniki. „Przeskoki” mają od 1 do 4 par przeskoków, a „Kłódki” od 1 do 6 kłódek.
 3. Gałąź „Mieszane” (20 poziomów) łączy ściany, pola dalekiego zasięgu i pola liniowe. Otwiera się, gdy ukończysz co najmniej 10 poziomów w każdej z tych trzech gałęzi.
 4. Gałąź „Wyspy” (20 poziomów) ma od 2 do 4 wysp połączonych przeskokami i do 2 dodatkowych par przeskoków. Otwiera się, gdy ukończysz co najmniej 10 poziomów gałęzi „Przeskoki”.
-5. W każdej gałęzi kolejny poziom otwiera się po ukończeniu poprzedniego. Ukończony poziom zostaje otwarty.
+5. W gałęziach „Linie”, „Kłódki” i „Mieszane” ściany dzielą planszę na pokoje. Pokoje łączą przejścia szerokie na jedną krawędź pola.
+   Pola liniowe i kłódki stoją przy przejściach do następnego pokoju.
+6. W każdej gałęzi kolejny poziom otwiera się po ukończeniu poprzedniego. Ukończony poziom zostaje otwarty.
 
-Mapa pokazuje gałęzie w kolejności: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki”, „Zamki”, „Mieszane”, „Wyspy”.
+Mapa pokazuje gałęzie w kolejności: „Ściany”, „Daleki zasięg”, „Linie”, „Przeskoki”, „Kłódki”, „Mieszane”, „Wyspy”.
 Najpierw stoją gałęzie otwierane przez pień, potem te, które otwiera postęp w innych gałęziach.
 
 Za poziom dostajesz do 3 gwiazdek: 1 za wygraną, 1 za grę bez utraty życia i 1 za grę bez podpowiedzi.
@@ -91,7 +116,7 @@ Parametry poziomów zmienisz w tabeli `Campaign.TUNING` w pliku `app/src/main/ja
 
 Wygląd gry zmienisz w menu, w sekcji „Ustawienia”, w części „Motyw”.
 Wybór działa od razu, a gra go zapamiętuje.
-Każdy motyw ma własne kolory kuli i ekranów, tło oraz szeryfową czcionkę.
+Każdy motyw ma własne kolory kuli i ekranów oraz tło. Motywy pastelowe mają też szeryfową czcionkę.
 
 | Motyw | Charakter | Czcionka |
 |---|---|---|
@@ -99,9 +124,10 @@ Każdy motyw ma własne kolory kuli i ekranów, tło oraz szeryfową czcionkę.
 | Szałwia | szarozielona szałwia i pudrowy róż | Libre Baskerville 700 |
 | Porcelana | biel i wyblakły kobalt | EB Garamond 600 |
 | Zmierzch | ciemny: grafit, śliwka, przykurzony róż | Crimson Pro 600 |
-| Kosmos | dotychczasowy wygląd: neonowa kula na tle z gwiazdami | systemowa |
+| Kosmos | ciemny: neonowa kula na tle z gwiazdami | systemowa |
 
 Cyfry na odkrytych polach mają kontrast co najmniej 4,5:1 względem pola w motywach Akwarela, Szałwia, Porcelana i Zmierzch.
+Tekst ekranów, także najbledszy, ma kontrast co najmniej 4,5:1 względem tła i paneli we wszystkich motywach.
 
 ### Jak dodać motyw
 

@@ -11,9 +11,10 @@ import org.junit.Test
  * Each level is built with [Campaign.buildLevel] and reduced to a fingerprint: 64-bit FNV-1a over the
  * UTF-8 bytes of a canonical text ([describe]) holding the id, the frequency, the start cell, the
  * sorted mines, every wall as its corner indices in generator order, the sorted far cells and every
- * line cell with its side and row. Levels with ocean, portals or locks also list the ocean cells,
- * the portal pairs and the lock thresholds; levels without them keep the shorter text, so their
- * fingerprints do not depend on these features. [GOLDEN] holds the expected fingerprint of every level.
+ * line cell with its side and row (walls between rooms are part of the walls). Levels with rooms,
+ * ocean, portals or locks also list the room count, the ocean cells, the portal pairs and the lock
+ * thresholds; levels without them keep the shorter text, so their fingerprints do not depend on these
+ * features. [GOLDEN] holds the expected fingerprint of every level.
  *
  * A changed fingerprint means players get a different board for that level: progress and stars they
  * earned would then belong to a board they never saw. Changes in [StableRandom], [BoardLayout],
@@ -78,10 +79,10 @@ class CampaignGoldenTest {
         private const val WALLS_01_START = 21
         private val WALLS_01_FIRST_MINES = intArrayOf(2, 9, 27, 35, 39)
         private val WALLS_01_WALLS = arrayOf(intArrayOf(480, 481, 482, 319, 320), intArrayOf(522, 527, 473, 468))
-        private const val LINES_01_START = 61
+        private const val LINES_01_START = 37
 
         /** Line cells of lines-01 as "cell:side". */
-        private val LINES_01_LINE_CELLS = listOf("38:0", "75:0")
+        private val LINES_01_LINE_CELLS = listOf("78:4")
 
         /** Expected fingerprint of every campaign level, by id. Regenerate with [main]. */
         private val GOLDEN: Map<String, String> = mapOf(
@@ -135,46 +136,46 @@ class CampaignGoldenTest {
             "far-18" to "4d4c2faeda4b3ef0",
             "far-19" to "9fac20ea00a11696",
             "far-20" to "5f6fc03546a7eb82",
-            "lines-01" to "ca11b1fa4147c982",
-            "lines-02" to "8b640c613e3df81d",
-            "lines-03" to "308b22b8a663f0ed",
-            "lines-04" to "01cbd17856ab25a4",
-            "lines-05" to "04146b7a5202fff5",
-            "lines-06" to "2f40ac3e6405f4f5",
-            "lines-07" to "7907e9a4ab5ffd84",
-            "lines-08" to "8f57fb3a1ad5fa6b",
-            "lines-09" to "d94df4d6ea2808d2",
-            "lines-10" to "e2641c3b0cd4b72a",
-            "lines-11" to "de714b330191600f",
-            "lines-12" to "80c8602d17737032",
-            "lines-13" to "c5cc7f0b1bcb9f66",
-            "lines-14" to "4f0ad7ef15117ac0",
-            "lines-15" to "7682680a2b6ac654",
-            "lines-16" to "40b64f686b5c837b",
-            "lines-17" to "6f098e5aa3aa2d7e",
-            "lines-18" to "3214a4abf37dcf55",
-            "lines-19" to "c908c90b3dbf5542",
-            "lines-20" to "f21eaf21653d4359",
-            "mixed-01" to "04f85f548670d3ce",
-            "mixed-02" to "07d73140f64278f8",
-            "mixed-03" to "3087701981a13020",
-            "mixed-04" to "3769a12af88c27e1",
-            "mixed-05" to "0aa70e775035a2e4",
-            "mixed-06" to "4927b11a96da654a",
-            "mixed-07" to "fee4f58c36740d3f",
-            "mixed-08" to "2784677ea3dd51e0",
-            "mixed-09" to "8a345d876047addd",
-            "mixed-10" to "e4e684ba87e1b8e5",
-            "mixed-11" to "c931693a58e30555",
-            "mixed-12" to "76ceb00ae60b026b",
-            "mixed-13" to "31994183f3ed9888",
-            "mixed-14" to "537fa840875854a9",
-            "mixed-15" to "c0c3dfce0efdb553",
-            "mixed-16" to "f839ab5c132234d0",
-            "mixed-17" to "2e69d0de84e41126",
-            "mixed-18" to "8319b183fff28f96",
-            "mixed-19" to "a80acd71498c001b",
-            "mixed-20" to "d07f253e36579748",
+            "lines-01" to "03f3e9a3d5f44237",
+            "lines-02" to "dd3d8e42273ecc27",
+            "lines-03" to "e82bceda3a5cf4fc",
+            "lines-04" to "9980be573895a205",
+            "lines-05" to "f22f2c515ebac4e3",
+            "lines-06" to "06e30085312c2ba8",
+            "lines-07" to "82a036961f183705",
+            "lines-08" to "c1ad09d6a0f25f0b",
+            "lines-09" to "abcb814d574a8fd9",
+            "lines-10" to "8e6fb2e77f4fb8f2",
+            "lines-11" to "c2b406eec91779c9",
+            "lines-12" to "81f54540ec15b85e",
+            "lines-13" to "b6e77354aeafea66",
+            "lines-14" to "3a166e81d4603d96",
+            "lines-15" to "85a00466bf9346b2",
+            "lines-16" to "d44e0301f392fc09",
+            "lines-17" to "99242a234f8778b1",
+            "lines-18" to "227b7ba66e50d409",
+            "lines-19" to "14946fa2fdead7e1",
+            "lines-20" to "5eb21a72476dfbeb",
+            "mixed-01" to "a18530e59643f471",
+            "mixed-02" to "84ae0f601346ed72",
+            "mixed-03" to "6d5c9cf927eb6c9d",
+            "mixed-04" to "98dcd9446d7277aa",
+            "mixed-05" to "a47cc17267b8fc52",
+            "mixed-06" to "12fbb6e3a1a0d598",
+            "mixed-07" to "28e694b9146bca64",
+            "mixed-08" to "37e2fd2aa0066b8e",
+            "mixed-09" to "3c4d384a617933b1",
+            "mixed-10" to "adf9e2fa5cba3f98",
+            "mixed-11" to "eae7b290ee4b595a",
+            "mixed-12" to "bb127a370505feaa",
+            "mixed-13" to "de8b5a36a644ad82",
+            "mixed-14" to "6a86b44ddfc02390",
+            "mixed-15" to "cf4a04f293f88524",
+            "mixed-16" to "bc2c8a1e0bb4a484",
+            "mixed-17" to "73d5628ae8558063",
+            "mixed-18" to "de71ee23d71125db",
+            "mixed-19" to "d6f5be69a1d3f166",
+            "mixed-20" to "8f6afe9384776dd0",
             "portals-01" to "5e61969b0dccdee2",
             "portals-02" to "7aa069aca7ccc445",
             "portals-03" to "6d9ee28cfafe8a30",
@@ -195,26 +196,26 @@ class CampaignGoldenTest {
             "portals-18" to "1b0c9a5e60ffd944",
             "portals-19" to "4a8db9a851433c97",
             "portals-20" to "7ece956a6b372470",
-            "locks-01" to "979460d24e510d62",
-            "locks-02" to "7ffc7fa4398e94f0",
-            "locks-03" to "cfad7d118d4914f3",
-            "locks-04" to "6abb606cc9daf24e",
-            "locks-05" to "f77f305fd6f5a238",
-            "locks-06" to "9d077eea760b189c",
-            "locks-07" to "f99501aed0083265",
-            "locks-08" to "c3b2a5e49629ec9d",
-            "locks-09" to "f9d8828f5bbb9724",
-            "locks-10" to "3b4de681639aef09",
-            "locks-11" to "d202f72d8844f1c1",
-            "locks-12" to "71c588c7c04acda5",
-            "locks-13" to "dfa24038f7c3f2af",
-            "locks-14" to "189438aed9ed792a",
-            "locks-15" to "c59ddcd37871864d",
-            "locks-16" to "92a47ad46fef490f",
-            "locks-17" to "219979e27dbe9213",
-            "locks-18" to "46a2cc217deec9c8",
-            "locks-19" to "df3652d5c3fb9262",
-            "locks-20" to "dbf8b551cd73b4ce",
+            "locks-01" to "44526b3b83fa9129",
+            "locks-02" to "63c54f9c03480319",
+            "locks-03" to "31532e2e47f817f3",
+            "locks-04" to "7c02b67ec6269c4f",
+            "locks-05" to "d7f1854f7011c5b8",
+            "locks-06" to "1ac2ca5c8af66121",
+            "locks-07" to "e3a3bb1f0f93561e",
+            "locks-08" to "979b6f55f25e7740",
+            "locks-09" to "dcb85769136fee36",
+            "locks-10" to "0aaa9ede27b00bd2",
+            "locks-11" to "e734c10f6abcbe5e",
+            "locks-12" to "f69e11834efbb130",
+            "locks-13" to "a68c878eb1f74e20",
+            "locks-14" to "cbb32546e29670a3",
+            "locks-15" to "1ac76c45348b5588",
+            "locks-16" to "2a4bdc1a33fdd782",
+            "locks-17" to "f9c65720a5dab421",
+            "locks-18" to "3e4de33b52a07f73",
+            "locks-19" to "05543e80da8c65af",
+            "locks-20" to "1bf2b9f9f222a66e",
             "islands-01" to "7318c3f4f64db16e",
             "islands-02" to "34fec21a9eb89198",
             "islands-03" to "63bc004f09da1c1a",
@@ -261,6 +262,9 @@ class CampaignGoldenTest {
          * `id=walls-01;f=3;start=40;mines=2,17;walls=[5,6,7][...];far=;lines=12:3:13,14,15|...`.
          * Walls keep the order and direction the generator gives them, far and line cells are sorted.
          *
+         * A level with rooms has `;rooms=` with its [LevelSpec.rooms] right after the frequency; levels
+         * without rooms leave it out.
+         *
          * Only when the level has them, three parts follow: `;ocean=` with the sorted ocean cells,
          * `;portals=` with every pair as `a-b` (lower cell first) in pair order, and `;locks=` with
          * every lock as `cell:threshold` in cell order.
@@ -271,6 +275,7 @@ class CampaignGoldenTest {
             return buildString {
                 append("id=").append(level.spec.id)
                 append(";f=").append(level.spec.frequency)
+                if (level.spec.rooms > 0) append(";rooms=").append(level.spec.rooms)
                 append(";start=").append(level.start)
                 append(";mines=").append(level.mines.sorted().joinToString(","))
                 append(";walls=")

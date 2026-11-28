@@ -23,6 +23,13 @@ class Haptics(private val view: View, private val vibrator: Vibrator?) {
             Feedback.FLAG -> view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             Feedback.CHORD -> view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
             Feedback.EXPLOSION -> explode()
+            Feedback.REJECT -> view.performHapticFeedback(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    HapticFeedbackConstants.REJECT
+                } else {
+                    HapticFeedbackConstants.VIRTUAL_KEY
+                },
+            )
         }
     }
 

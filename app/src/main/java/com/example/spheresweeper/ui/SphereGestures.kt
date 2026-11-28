@@ -23,10 +23,14 @@ import kotlin.math.sqrt
  *
  * - One finger beyond touch slop: trackball rotation, with inertia after release.
  * - Two fingers: pinch zoom; the gesture can no longer be a tap.
- * - Double-tap mode: a tap reveals after [DOUBLE_TAP_MILLIS] unless a second tap arrives, which
- *   flags a covered cell or chords a revealed number. The pending reveal is held while the next
- *   finger is down and executed as soon as that gesture turns out not to be a tap.
- * - Long-press mode: holding still for [LONG_PRESS_MILLIS] toggles a flag; a tap acts immediately.
+ * - Double-tap mode: a single tap acts after [DOUBLE_TAP_MILLIS] ([GameViewModel.singleTap]: reveal,
+ *   or the scope highlight of a revealed far cell) unless a second tap arrives, which flags a covered
+ *   cell or chords a revealed number. The pending tap is held while the next finger is down and
+ *   executed as soon as that gesture turns out not to be a tap.
+ * - Long-press mode: a tap acts immediately ([GameViewModel.tapImmediate]); holding a covered cell
+ *   still for [LONG_PRESS_MILLIS] toggles its flag.
+ * - Both modes: holding a revealed number still for [LONG_PRESS_MILLIS] flags the covered cells of
+ *   its scope when they must all be mines ([GameViewModel.longPress]).
  */
 class SphereInputController(
     private val vm: GameViewModel,
@@ -92,10 +96,9 @@ class SphereInputController(
                         // Finger held still long enough: never a tap any more.
                         potentialTap = false
                         releaseHeldTap()
-                        if (flagByLongPress) {
-                            val cell = pick(downX, downY, size.width.toFloat(), size.height.toFloat())
-                            if (cell >= 0) haptics?.perform(vm.longPress(cell, vm.gameId))
-                        }
+                        // Both modes: auto flag on a revealed number; a flag on a covered cell in long-press mode.
+                        val cell = pick(downX, downY, size.width.toFloat(), size.height.toFloat())
+                        if (cell >= 0) haptics?.perform(vm.longPress(cell, vm.gameId))
                         continue
                     }
 
@@ -215,7 +218,7 @@ class SphereInputController(
             val game = pendingGame
             pendingJob = null
             pendingCell = -1
-            if (target >= 0) haptics?.perform(vm.reveal(target, game))
+            if (target >= 0) haptics?.perform(vm.singleTap(target, game))
         }
     }
 
@@ -233,13 +236,13 @@ class SphereInputController(
         pendingCell = -1
     }
 
-    /** Executes the frozen tap as a plain reveal. */
+    /** Executes the frozen tap as a single tap. */
     private fun releaseHeldTap() {
         val cell = heldCell
         if (cell < 0) return
         val game = heldGame
         heldCell = -1
-        haptics?.perform(vm.reveal(cell, game))
+        haptics?.perform(vm.singleTap(cell, game))
     }
 
     private fun dropHeldTap() {

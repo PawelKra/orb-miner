@@ -5,7 +5,8 @@ import kotlin.math.roundToInt
 /**
  * Parts of the campaign tree. [TRUNK] is the classic introduction; the other branches grow out of
  * it, each built around one board feature: walls, far cells, line cells ([MIXED] combines those
- * three), portals, locks and islands joined by portals.
+ * three), portals, locks and islands joined by portals. [LINES], [MIXED] and [LOCKS] split the board
+ * into rooms joined by passages, where their line cells and locks stand.
  */
 enum class Branch { TRUNK, WALLS, FAR, LINES, MIXED, PORTALS, LOCKS, ISLANDS }
 
@@ -16,7 +17,10 @@ enum class Branch { TRUNK, WALLS, FAR, LINES, MIXED, PORTALS, LOCKS, ISLANDS }
  * every play.
  *
  * [islands] is the island count of [BoardLayout.generate] (0: no ocean), [portals] the extra portal
- * pairs on top of those joining the islands, [locks] the lock count of [NoGuessGenerator.generate].
+ * pairs on top of those joining the islands, [locks] the lock count of [NoGuessGenerator.generate] and
+ * [rooms] the room count of [BoardLayout.generate] (0: no rooms). With rooms, [lineCells] and [locks]
+ * are upper limits: line cells and locks stand only at passages between rooms, so a built level
+ * usually has fewer of them.
  *
  * [mines] is the nominal mine count. Without ocean the built board has exactly that many. With
  * islands the land size is drawn, so [Campaign.buildLevel] puts the branch's mine density on the
@@ -40,6 +44,7 @@ data class LevelSpec(
     val islands: Int = 0,
     val portals: Int = 0,
     val locks: Int = 0,
+    val rooms: Int = 0,
 ) {
     /** 1-based position in the branch, as shown to the player. */
     val number: Int get() = index + 1
@@ -65,6 +70,8 @@ class PreparedLevel(
     /** Mine cells, sorted ascending; their count is [Campaign.mineCount] of the level. */
     val mines: IntArray,
     val board: MinesweeperBoard,
+    /** Mine layouts [NoGuessGenerator] drew from scratch after the first one ([NoGuessLayout.redraws]). */
+    val redraws: Int = 0,
 )
 
 /**
@@ -107,6 +114,7 @@ class BranchTuning(
     val islands: Ramp = Ramp.ZERO,
     val portals: Ramp = Ramp.ZERO,
     val locks: Ramp = Ramp.ZERO,
+    val rooms: Ramp = Ramp.ZERO,
 )
 
 /**
@@ -123,19 +131,31 @@ object Campaign {
      *   boards smaller and sparser than [BoardSize.MEDIUM] (17%) and has no walls, far or line cells.
      * - Walls, far, lines: frequency 3 to 8 (92 to 642 cells), density 14% to 19.5%. A branch opens
      *   on a small board so the new feature is easy to read, and ends near [BoardSize.GIANT] (19.5%).
-     *   The feature count grows with the board, a little beyond [BoardSize] at the top because the
-     *   branch is about that feature.
+     *   The feature count grows with the board; walls and far cells go a little beyond [BoardSize] at
+     *   the top because the branch is about that feature.
+     * - Lines: 3 to 9 rooms and up to 2 to 8 line cells. Every line cell stands at a passage and
+     *   looks into the next room, at most one per passage, so a level has at most rooms - 1 of them;
+     *   the room count keeps that number growing along the branch.
      * - Mixed: opens only after half of the other three branches, so it starts denser (15%) and ends
      *   at 20%. It uses all three features, each with fewer elements than its own branch so that the
-     *   board stays readable.
+     *   board stays readable: 1 to 5 walls, 2 to 12 far cells, 3 to 6 rooms and up to 2 to 5 line
+     *   cells.
      *
      * - Portals, locks: like the walls branch, frequency 3 to 8 and density 14% to 19.5%, with 1 to 4
-     *   extra portal pairs or 1 to 6 locks. No ocean, walls, far or line cells, so the one new
-     *   feature is easy to follow.
+     *   extra portal pairs or up to 1 to 6 locks. No ocean, far or line cells and no walls other than
+     *   those between rooms, so the one new feature is easy to follow. The locks branch splits the
+     *   board into 2 to 7 rooms: each lock stands at a passage into the next room and shows its number
+     *   once its own room is solved. Only some passages can hold a lock, so a level often gets fewer
+     *   locks than its count.
      * - Islands: 2 to 4 islands joined by portals, plus 0 to 2 extra portal pairs. Two islands need
      *   frequency 4 and three need 5 ([BoardLayout.maxIslandCount]), so the branch runs from
      *   frequency 4 to 8. Density 14% to 19.5% counts the land of the built board, not the ocean
      *   ([mineCount]).
+     *
+     * Built levels of the lines and mixed branches have at least one line cell and those of the locks
+     * branch at least one lock, and along a branch the count actually placed never falls by more than
+     * two from one level to the next. CampaignRoomsTest checks both on the pinned boards; a retuning
+     * that breaks them needs other room counts for the affected levels.
      *
      * Lives fall from 3 to 1 and hints from 2 to 0 within every branch: early levels forgive mistakes
      * while the player learns, the last ones play by classic rules. Boards come from
@@ -163,14 +183,14 @@ object Campaign {
             prefix = "lines", size = 20,
             frequency = Ramp(3.0, 8.0), density = Ramp(0.14, 0.195),
             lives = Ramp(3.0, 1.0), hints = Ramp(2.0, 0.0),
-            lineCells = Ramp(2.0, 14.0),
+            lineCells = Ramp(2.0, 8.0), rooms = Ramp(3.0, 9.0),
         ),
         Branch.MIXED to BranchTuning(
             prefix = "mixed", size = 20,
             frequency = Ramp(3.0, 8.0), density = Ramp(0.15, 0.20),
             lives = Ramp(3.0, 1.0), hints = Ramp(2.0, 0.0),
             walls = Ramp(1.0, 5.0), wallMaxLength = Ramp(4.0, 12.0),
-            farCells = Ramp(2.0, 12.0), lineCells = Ramp(2.0, 9.0),
+            farCells = Ramp(2.0, 12.0), lineCells = Ramp(2.0, 5.0), rooms = Ramp(3.0, 6.0),
         ),
         Branch.PORTALS to BranchTuning(
             prefix = "portals", size = 20,
@@ -182,7 +202,7 @@ object Campaign {
             prefix = "locks", size = 20,
             frequency = Ramp(3.0, 8.0), density = Ramp(0.14, 0.195),
             lives = Ramp(3.0, 1.0), hints = Ramp(2.0, 0.0),
-            locks = Ramp(1.0, 6.0),
+            locks = Ramp(1.0, 6.0), rooms = Ramp(2.0, 7.0),
         ),
         Branch.ISLANDS to BranchTuning(
             prefix = "islands", size = 20,
@@ -232,13 +252,13 @@ object Campaign {
         if (spec.islands == 0) spec.mines else minesOnLand(nominalDensity(spec), layout, spec.locks)
 
     /**
-     * Builds [spec] on [geometry] (which must have the level's frequency). The ocean, walls, portals,
-     * far cells, line cells, locks, the mines and the start cell all come from one [StableRandom]
-     * seeded with spec.seed, so every call returns the same board on every Kotlin version, as long as
-     * [BoardLayout.generate] and [NoGuessGenerator.generate] draw the same way. With no islands,
-     * portals or locks they draw nothing for these features. CampaignGoldenTest pins the result. The
-     * mine count ([mineCount]) is fixed after the layout, without drawing. The board is started at
-     * once with [MinesweeperBoard.startWith].
+     * Builds [spec] on [geometry] (which must have the level's frequency). The ocean, rooms, walls,
+     * portals, far cells, line cells, locks, the mines and the start cell all come from one
+     * [StableRandom] seeded with spec.seed, so every call returns the same board on every Kotlin
+     * version, as long as [BoardLayout.generate] and [NoGuessGenerator.generate] draw the same way.
+     * With no islands, rooms, portals or locks they draw nothing for these features.
+     * CampaignGoldenTest pins the result. The mine count ([mineCount]) is fixed after the layout,
+     * without drawing. The board is started at once with [MinesweeperBoard.startWith].
      */
     fun buildLevel(spec: LevelSpec, geometry: SphereGeometry): PreparedLevel {
         require(geometry.frequency == spec.frequency) {
@@ -247,16 +267,17 @@ object Campaign {
         val random = StableRandom(spec.seed)
         val layout = BoardLayout.generate(
             geometry, spec.walls, spec.wallMinLength, spec.wallMaxLength, spec.farCells, random, spec.lineCells,
-            spec.islands, spec.portals,
+            spec.islands, spec.portals, spec.rooms,
         )
         val mines = mineCount(spec, layout)
         val generated = NoGuessGenerator.generate(layout, mines, random, spec.locks)
         val board = MinesweeperBoard(
             layout.scopes, mines, lives = spec.lives,
             present = layout.presentMask(), lockThresholds = generated.lockThresholds,
+            lockRegions = generated.lockRegions,
         )
         board.startWith(generated.mines, generated.start)
-        return PreparedLevel(spec, layout, generated.start, generated.mines, board)
+        return PreparedLevel(spec, layout, generated.start, generated.mines, board, generated.redraws)
     }
 
     /**
@@ -314,6 +335,7 @@ object Campaign {
                     islands = islands,
                     portals = tuning.portals.at(t).roundToInt(),
                     locks = tuning.locks.at(t).roundToInt(),
+                    rooms = tuning.rooms.at(t).roundToInt(),
                 ),
             )
             previousMines = mines

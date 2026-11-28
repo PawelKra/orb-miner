@@ -23,13 +23,16 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +42,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -46,10 +57,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.spheresweeper.R
+import com.example.spheresweeper.logic.BoardFeature
 import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.GameStatus
@@ -64,6 +81,9 @@ import kotlinx.coroutines.delay
 @Composable
 fun GameScreen(vm: GameViewModel) {
     BackHandler { vm.exitGame() }
+    // Registered later, so while feature cards are open back closes the card instead of the game.
+    val featureCards = vm.featureCards
+    BackHandler(enabled = featureCards != null) { vm.closeFeatureCard() }
 
     val geometry = vm.geometry
     val board = vm.board
@@ -75,7 +95,8 @@ fun GameScreen(vm: GameViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val landscape = maxWidth > maxHeight
-        val viewInsets = rememberBallInsets(landscape, withLevelLabel = level != null)
+        val hint = hintText(vm)
+        val viewInsets = rememberBallInsets(landscape, withLevelLabel = level != null, hint = hint, screenWidth = maxWidth)
 
         ThemeBackground()
 
@@ -123,7 +144,7 @@ fun GameScreen(vm: GameViewModel) {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 24.dp, vertical = HINT_VERTICAL_PADDING),
+                    .padding(horizontal = HINT_HORIZONTAL_PADDING, vertical = HINT_VERTICAL_PADDING),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (level != null) {
@@ -136,7 +157,7 @@ fun GameScreen(vm: GameViewModel) {
                     Spacer(Modifier.height(LEVEL_LABEL_GAP))
                 }
                 Text(
-                    text = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap),
+                    text = hint,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                     textAlign = TextAlign.Center,
@@ -188,7 +209,158 @@ fun GameScreen(vm: GameViewModel) {
                 )
             }
         }
+
+        if (featureCards != null && board != null) {
+            FeatureCardOverlay(cards = featureCards, landscape = landscape, onClose = { vm.closeFeatureCard() })
+        }
     }
+}
+
+/**
+ * One feature card over the dimmed game: a heading ("New" for an intro, "On this board" for cards opened
+ * from the HUD), "2/3" when there are several cards, then the legend drawing and text of the feature
+ * from the "How to play" screen and a button to the next card or back to the game. The scrim takes
+ * every touch, so the ball neither turns nor takes moves while the card is open. In landscape the
+ * drawing sits beside the text so that the card fits the low screen.
+ */
+@Composable
+private fun FeatureCardOverlay(cards: FeatureCards, landscape: Boolean, onClose: () -> Unit) {
+    val colors = themeColors
+    val shape = RoundedCornerShape(24.dp)
+    val feature = cards.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.backgroundBottom.copy(alpha = 0.6f))
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                }
+            }
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        // A new card starts scrolled to its top.
+        key(cards.index, feature) {
+            val cardModifier = Modifier
+                .widthIn(max = if (landscape) 640.dp else 420.dp)
+                .fillMaxWidth()
+                .clip(shape)
+                .background(colors.panel.copy(alpha = 0.95f))
+                .border(1.dp, colors.primary.copy(alpha = 0.6f), shape)
+            if (landscape) {
+                Row(
+                    modifier = cardModifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FeatureDrawing(feature, Modifier.weight(1f), maxHeight = FEATURE_DRAWING_MAX_HEIGHT)
+                    Spacer(Modifier.width(16.dp))
+                    Column(
+                        Modifier
+                            .weight(1.3f)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        FeatureCardHeader(cards)
+                        Spacer(Modifier.height(8.dp))
+                        FeatureText(feature)
+                        Spacer(Modifier.height(14.dp))
+                        FeatureCardButton(cards, onClose)
+                    }
+                }
+            } else {
+                Column(
+                    cardModifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp),
+                ) {
+                    FeatureCardHeader(cards)
+                    Spacer(Modifier.height(10.dp))
+                    FeatureDrawing(feature, maxHeight = FEATURE_DRAWING_MAX_HEIGHT)
+                    Spacer(Modifier.height(10.dp))
+                    FeatureText(feature)
+                    Spacer(Modifier.height(16.dp))
+                    FeatureCardButton(cards, onClose)
+                }
+            }
+        }
+    }
+}
+
+/** "New" or "On this board", with the card counter on the right when there are several cards. */
+@Composable
+private fun FeatureCardHeader(cards: FeatureCards) {
+    val colors = themeColors
+    val count = cards.features.size
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = stringResource(if (cards.intro) R.string.feature_card_new else R.string.feature_card_board),
+            style = MaterialTheme.typography.titleSmall,
+            color = colors.gold,
+            modifier = Modifier
+                .weight(1f)
+                .semantics { heading() },
+        )
+        if (count > 1) {
+            val counterDescription = stringResource(R.string.feature_card_counter_desc, cards.index + 1, count)
+            Text(
+                text = stringResource(R.string.feature_card_counter, cards.index + 1, count),
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.textSecondary,
+                modifier = Modifier.semantics { contentDescription = counterDescription },
+            )
+        }
+    }
+}
+
+/** "Next" while more cards follow, "OK" on the last one. */
+@Composable
+private fun FeatureCardButton(cards: FeatureCards, onClose: () -> Unit) {
+    val last = cards.index == cards.features.size - 1
+    GlowTextButton(
+        text = stringResource(if (last) R.string.feature_card_ok else R.string.feature_card_next),
+        onClick = onClose,
+        modifier = Modifier.fillMaxWidth(),
+        primary = true,
+        accent = themeColors.primary,
+    )
+}
+
+/** Tallest feature drawing on a card; the far cell's drawing would otherwise take most of the screen. */
+private val FEATURE_DRAWING_MAX_HEIGHT = 180.dp
+
+/**
+ * Question mark: "what is on this board". The hook path and the stroke are built for the icon size of
+ * the first draw and kept until that size changes, so redrawing the icon allocates nothing.
+ */
+private class QuestionIcon {
+    private val hook = Path()
+    private var stroke = Stroke()
+    private var builtForSize = -1f
+
+    fun draw(scope: DrawScope, color: Color) {
+        with(scope) {
+            val w = size.minDimension
+            if (w != builtForSize) {
+                builtForSize = w
+                stroke = Stroke(width = w * 0.12f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                // Hook: three quarters of a circle from its left point over the top, ending below its centre.
+                hook.reset()
+                hook.arcTo(Rect(w * 0.29f, w * 0.1f, w * 0.71f, w * 0.52f), 180f, 270f, forceMoveTo = true)
+                hook.lineTo(w * 0.5f, w * 0.66f)
+            }
+            drawPath(hook, color, style = stroke)
+            drawCircle(color = color, radius = w * 0.075f, center = Offset(w * 0.5f, w * 0.88f))
+        }
+    }
+}
+
+/** The help line under the ball: the controls, with the far cell tip only on boards that have far cells. */
+@Composable
+private fun hintText(vm: GameViewModel): String {
+    val controls = stringResource(if (vm.flagByLongPress) R.string.hint_long_press else R.string.hint_double_tap)
+    if (BoardFeature.FAR !in vm.boardFeatures) return controls
+    return "$controls · ${stringResource(R.string.hint_far_scope)}"
 }
 
 /** "Walls · 7/20": branch name and the level's place in it. */
@@ -202,11 +374,16 @@ private fun levelLabel(level: LevelSpec): String = stringResource(
 
 /**
  * Margins the ball has to stay clear of: system bars, the HUD (top row in portrait, side columns in
- * landscape) and the hint line at the bottom, with the level label above it when [withLevelLabel].
+ * landscape) and the help line [hint] at the bottom, with the level label above it when [withLevelLabel].
  * The band is always reserved so the ball does not jump when the hint disappears after the first move.
+ *
+ * The band is as tall as [hint] laid out in the theme font across [screenWidth], less the safe insets
+ * and the side padding of the help line, so a line that wraps (a long text, a wide font or a large
+ * system font size) never runs over the ball. It is never lower than one line in landscape, or two in
+ * portrait, where the lives and hints row takes the band after the first move.
  */
 @Composable
-private fun rememberBallInsets(landscape: Boolean, withLevelLabel: Boolean): ViewInsets {
+private fun rememberBallInsets(landscape: Boolean, withLevelLabel: Boolean, hint: String, screenWidth: Dp): ViewInsets {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val safe = WindowInsets.safeDrawing
@@ -214,13 +391,27 @@ private fun rememberBallInsets(landscape: Boolean, withLevelLabel: Boolean): Vie
     val safeTop = safe.getTop(density).toFloat()
     val safeRight = safe.getRight(density, layoutDirection).toFloat()
     val safeBottom = safe.getBottom(density).toFloat()
-    val hintFontSize = MaterialTheme.typography.bodySmall.fontSize
+    val hintStyle = MaterialTheme.typography.bodySmall
     val labelFontSize = MaterialTheme.typography.titleSmall.fontSize
-    return remember(landscape, withLevelLabel, density, safeLeft, safeTop, safeRight, safeBottom, hintFontSize, labelFontSize) {
+    val textMeasurer = rememberTextMeasurer()
+    val hintWidth = with(density) {
+        (screenWidth.toPx() - safeLeft - safeRight - 2f * HINT_HORIZONTAL_PADDING.toPx()).toInt().coerceAtLeast(0)
+    }
+    val hintHeight = remember(textMeasurer, hint, hintStyle, hintWidth) {
+        textMeasurer.measure(
+            text = AnnotatedString(hint),
+            style = hintStyle,
+            constraints = Constraints(maxWidth = hintWidth),
+        ).size.height
+    }
+    return remember(
+        landscape, withLevelLabel, density, safeLeft, safeTop, safeRight, safeBottom, hintStyle, labelFontSize, hintHeight,
+    ) {
         with(density) {
-            val hintLines = if (landscape) 1 else 2
+            val minLines = if (landscape) 1 else 2
+            val minHintHeight = hintStyle.fontSize.toPx() * HINT_LINE_FACTOR * minLines
             val labelBand = if (withLevelLabel) labelFontSize.toPx() * HINT_LINE_FACTOR + LEVEL_LABEL_GAP.toPx() else 0f
-            val hintBand = HINT_VERTICAL_PADDING.toPx() * 2f + hintFontSize.toPx() * HINT_LINE_FACTOR * hintLines + labelBand
+            val hintBand = HINT_VERTICAL_PADDING.toPx() * 2f + maxOf(minHintHeight, hintHeight.toFloat()) + labelBand
             if (landscape) {
                 val side = (HUD_EDGE_PADDING + HUD_SIDE_COLUMN_WIDTH).toPx()
                 ViewInsets(
@@ -245,6 +436,7 @@ private val HUD_EDGE_PADDING = 16.dp
 private val HUD_ROW_HEIGHT = 64.dp // 48 dp buttons plus 8 dp padding above and below
 private val HUD_SIDE_COLUMN_WIDTH = 112.dp
 private val HINT_VERTICAL_PADDING = 16.dp
+private val HINT_HORIZONTAL_PADDING = 24.dp
 private val LEVEL_LABEL_GAP = 4.dp
 private const val HINT_LINE_FACTOR = 1.4f
 
@@ -305,6 +497,7 @@ private fun SphereView(
             nowNanos = System.nanoTime(),
             effectCell = vm.effectCell,
             layout = vm.layout,
+            highlightCell = vm.highlightCell,
         )
     }
 }
@@ -342,7 +535,11 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
     val timeDescription = stringResource(R.string.hud_time, timeText)
     val menuDescription = stringResource(if (vm.config is GameConfig.Level) R.string.action_map else R.string.action_menu)
     val restartDescription = stringResource(R.string.action_restart)
+    val helpDescription = stringResource(R.string.action_feature_help)
     val colors = themeColors
+    val questionIcon = remember { QuestionIcon() }
+    // Boards with plain numbers and flags only have nothing to explain beyond the help line.
+    val showHelp = vm.board != null && vm.boardFeatures.isNotEmpty()
 
     val menuButton: @Composable () -> Unit = {
         GlowIconButton(
@@ -358,6 +555,15 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
             contentDescription = restartDescription,
             accent = colors.primary,
             icon = { drawRestartIcon(it) },
+        )
+    }
+    val helpButton: @Composable (Modifier) -> Unit = { modifier ->
+        GlowIconButton(
+            onClick = { vm.openFeatureHelp() },
+            contentDescription = helpDescription,
+            modifier = modifier,
+            accent = colors.gold,
+            icon = { questionIcon.draw(this, it) },
         )
     }
     val minesPill: @Composable () -> Unit = {
@@ -401,23 +607,38 @@ private fun Hud(vm: GameViewModel, landscape: Boolean) {
                 restartButton()
                 timePill()
                 if (vm.config.hints > 0) HintPill(vm)
+                if (showHelp) helpButton(Modifier)
             }
         }
     } else {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // The top row has no room for a fifth control on a 360 dp screen, so the help button sits just
+        // below the restart button, in the corner the round ball leaves free.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            menuButton()
-            Spacer(Modifier.weight(1f))
-            minesPill()
-            Spacer(Modifier.width(10.dp))
-            timePill()
-            Spacer(Modifier.weight(1f))
-            restartButton()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                menuButton()
+                Spacer(Modifier.weight(1f))
+                minesPill()
+                Spacer(Modifier.width(10.dp))
+                timePill()
+                Spacer(Modifier.weight(1f))
+                restartButton()
+            }
+            if (showHelp) {
+                helpButton(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = HUD_ROW_HEIGHT, end = 16.dp),
+                )
+            }
         }
     }
 }

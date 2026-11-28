@@ -68,6 +68,11 @@ class SpherePalette(
     val decalOutline: Int,
     val decalOutlineAlpha: Float,
     val far: Int,
+    /**
+     * Dark line along the inner side of the far-colour band of a scope highlight, between the band and
+     * the cell fill. Where the far colour is close to the fill, this line stands out against it instead.
+     */
+    val farOutline: Int,
     val line: Int,
     val wallCore: Int,
     val wallGlow: Int,

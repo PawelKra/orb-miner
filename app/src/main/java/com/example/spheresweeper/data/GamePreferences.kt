@@ -3,6 +3,8 @@ package com.example.spheresweeper.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.example.spheresweeper.logic.BoardFeature
+import com.example.spheresweeper.logic.BoardFeatures
 import com.example.spheresweeper.logic.BoardSize
 
 /** Settings, best times and campaign progress stored locally in SharedPreferences. */
@@ -28,6 +30,11 @@ class GamePreferences(context: Context) {
     var campaignProgress: String?
         get() = prefs.getString(KEY_CAMPAIGN_PROGRESS, null)
         set(value) = prefs.edit { putString(KEY_CAMPAIGN_PROGRESS, value) }
+
+    /** Board features whose introduction card the player has closed, in the text form of [BoardFeatures.serialize]. */
+    var seenFeatures: Set<BoardFeature>
+        get() = BoardFeatures.parse(prefs.getString(KEY_SEEN_FEATURES, null))
+        set(value) = prefs.edit { putString(KEY_SEEN_FEATURES, BoardFeatures.serialize(value)) }
 
     /** Best time in milliseconds for [size], or null when the board was never won. */
     fun bestTimeMillis(size: BoardSize): Long? {
@@ -58,6 +65,7 @@ class GamePreferences(context: Context) {
         const val KEY_BEST_PREFIX = "best_time_"
         const val KEY_CAMPAIGN_PROGRESS = "campaign_progress"
         const val KEY_THEME = "theme"
+        const val KEY_SEEN_FEATURES = "seen_features"
         const val NO_TIME = -1L
     }
 }
