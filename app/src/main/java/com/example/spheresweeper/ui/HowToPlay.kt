@@ -296,9 +296,15 @@ private sealed class CellMark {
     object OpenLock : CellMark()
 }
 
-private class LegendCell(val col: Int, val y: Int, val fill: CellFill, val marks: Array<out CellMark>)
+private class LegendCell(val col: Int, val y: Int, val fill: CellFill, val marks: Array<out CellMark>) {
+    /** A revealed cell that shows nothing: it gets the soft outline, as on the ball. */
+    val empty: Boolean get() = fill == CellFill.REVEALED && marks.isEmpty()
 
-/** Wall along edge [edge] of the cell at ([col], [y]). */
+    /** A covered cell without marks: it shows the dot of an unknown cell, as on the ball. */
+    val dotted: Boolean get() = fill == CellFill.COVERED && marks.isEmpty()
+}
+
+/** Edge [edge] of the cell at ([col], [y]): a wall, a stretch of coast or a border drawn on its own. */
 private class WallEdge(val col: Int, val y: Int, val edge: Int)
 
 /** Row of a line cell at ([col], [y]): [length] cells straight through [edge]. */
@@ -318,6 +324,24 @@ private class LegendScene(
     val maxX: Float = cells.maxOf { SQRT3 * it.col } + CIRCUM_RADIUS
     val minY: Float = cells.minOf { it.y } - 1f
     val maxY: Float = cells.maxOf { it.y } + 1f
+
+    /** Edges between a land cell and an ocean cell, on the land side. */
+    val coast: List<WallEdge> =
+        edgesWhere { cell, other -> cell.fill != CellFill.OCEAN && other.fill == CellFill.OCEAN }
+
+    /** Edges between an empty revealed cell and a land cell that is not empty, on the empty side. */
+    val sharedBorders: List<WallEdge> =
+        edgesWhere { cell, other -> cell.empty && other.fill != CellFill.OCEAN && !other.empty }
+
+    /** Every edge of a cell to a neighbour in the scene for which [test] (cell, neighbour) holds. */
+    private fun edgesWhere(test: (LegendCell, LegendCell) -> Boolean): List<WallEdge> = buildList {
+        for (cell in cells) {
+            for (edge in 0 until 6) {
+                val other = cells.firstOrNull { it.col == cell.col + EDGE_COL[edge] && it.y == cell.y + EDGE_Y[edge] }
+                if (other != null && test(cell, other)) add(WallEdge(cell.col, cell.y, edge))
+            }
+        }
+    }
 }
 
 /** [large]: the drawing spans the card above the text, so that small numbers on it stay readable. */
@@ -538,7 +562,8 @@ private fun legendEntry(feature: BoardFeature): LegendEntry = when (feature) {
 
 /**
  * Draws legend scenes flat, in the colours of [palette]: cell fills as a cell facing the viewer gets
- * them on the ball, the cell border, walls with their glow, line rows and the marks of [CellDecals].
+ * them on the ball, the cell border (soft on empty revealed cells), ocean waves and the coastline,
+ * walls with their glow, line rows and the marks of [CellDecals], the dot of plain covered cells included.
  * Paints, the path and the colours are built once per theme; [draw] only reuses them.
  */
 private class LegendPainter(private val palette: SpherePalette, typeface: Typeface) {
@@ -557,6 +582,29 @@ private class LegendPainter(private val palette: SpherePalette, typeface: Typefa
     private val oceanEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
+    }
+
+    /** Soft outline of an empty revealed cell; its colour depends on the cell's fill. */
+    private val emptyBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    /** Normal border along one edge between an empty revealed cell and another land cell. */
+    private val sharedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = palette.border
+    }
+    private val coastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = palette.coast
+    }
+    private val coastCasingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = palette.coastCasing
     }
     private val wallGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -606,20 +654,24 @@ private class LegendPainter(private val palette: SpherePalette, typeface: Typefa
             oceanEdgePaint.color = oceanColor
             canvas.drawPath(path, oceanEdgePaint)
         }
-        borderPaint.strokeWidth = borderWidth(circumPx)
         for (i in 0 until cells.size) {
             val cell = cells[i]
-            val color = when (cell.fill) {
-                CellFill.OCEAN -> continue
-                CellFill.COVERED -> coveredColors[shadeIndex(cell)]
-                CellFill.REVEALED -> revealedColors[shadeIndex(cell)]
-                CellFill.MINE -> mineCellColor
-            }
-            buildHexPath(ox + SQRT3 * cell.col * s, oy + cell.y * s, s)
-            fillPaint.color = color
-            canvas.drawPath(path, fillPaint)
-            canvas.drawPath(path, borderPaint)
+            if (cell.fill != CellFill.OCEAN) continue
+            onDecal(canvas, ox + SQRT3 * cell.col * s, oy + cell.y * s, s) { decals.drawWaves(canvas, 1f) }
         }
+        val border = borderWidth(circumPx)
+        borderPaint.strokeWidth = border
+        for (i in 0 until cells.size) {
+            val cell = cells[i]
+            if (cell.fill == CellFill.OCEAN) continue
+            buildHexPath(ox + SQRT3 * cell.col * s, oy + cell.y * s, s)
+            fillPaint.color = fillColor(cell)
+            canvas.drawPath(path, fillPaint)
+            // An empty revealed cell gets its outline below, once every cell is filled.
+            if (!cell.empty) canvas.drawPath(path, borderPaint)
+        }
+        drawEmptyCellOutlines(canvas, scene, ox, oy, s, border)
+        drawCoast(canvas, scene, ox, oy, s, circumPx)
 
         val links = scene.links
         for (i in 0 until links.size) drawLink(canvas, links[i], ox, oy, s)
@@ -635,6 +687,9 @@ private class LegendPainter(private val palette: SpherePalette, typeface: Typefa
             val cy = oy + cell.y * s
             if (cell.fill == CellFill.MINE) {
                 onDecal(canvas, cx, cy, s) { decals.drawMine(canvas, palette.mine, 1f) }
+            } else if (cell.dotted) {
+                val fill = coveredColors[shadeIndex(cell)]
+                onDecal(canvas, cx, cy, s) { decals.drawCoveredDot(canvas, fill, 1f) }
             }
             val marks = cell.marks
             for (k in 0 until marks.size) drawMark(canvas, marks[k], cx, cy, s)
@@ -676,6 +731,56 @@ private class LegendPainter(private val palette: SpherePalette, typeface: Typefa
         canvas.scale(k, k)
         paint()
         canvas.restore()
+    }
+
+    /** Fill of a land cell. */
+    private fun fillColor(cell: LegendCell): Int = when (cell.fill) {
+        CellFill.COVERED -> coveredColors[shadeIndex(cell)]
+        CellFill.REVEALED -> revealedColors[shadeIndex(cell)]
+        CellFill.MINE -> mineCellColor
+        CellFill.OCEAN -> oceanColor
+    }
+
+    /**
+     * Soft outline of every empty revealed cell, as on the ball: the border mixed most of the way towards
+     * the cell's fill, with the normal border over it along the edges shared with land cells that are not
+     * empty. Both are clipped to the empty cell, so the neighbour keeps its own half of the border.
+     * [border] is the border width in pixels.
+     */
+    private fun drawEmptyCellOutlines(
+        canvas: NativeCanvas, scene: LegendScene, ox: Float, oy: Float, s: Float, border: Float,
+    ) {
+        emptyBorderPaint.strokeWidth = border
+        sharedBorderPaint.strokeWidth = border
+        val cells = scene.cells
+        val shared = scene.sharedBorders
+        for (i in 0 until cells.size) {
+            val cell = cells[i]
+            if (!cell.empty) continue
+            buildHexPath(ox + SQRT3 * cell.col * s, oy + cell.y * s, s)
+            canvas.save()
+            canvas.clipPath(path)
+            emptyBorderPaint.color = palette.emptyCellBorder(fillColor(cell))
+            canvas.drawPath(path, emptyBorderPaint)
+            for (k in 0 until shared.size) {
+                val edge = shared[k]
+                if (edge.col == cell.col && edge.y == cell.y) drawWallEdge(canvas, sharedBorderPaint, edge, ox, oy, s)
+            }
+            canvas.restore()
+        }
+    }
+
+    /** Coastline along every land edge that borders the ocean, over the palette's casing when it has one. */
+    private fun drawCoast(canvas: NativeCanvas, scene: LegendScene, ox: Float, oy: Float, s: Float, circumPx: Float) {
+        val coast = scene.coast
+        if (coast.isEmpty()) return
+        val width = COAST_WIDTH_PER_RADIUS * circumPx
+        if ((palette.coastCasing ushr 24) != 0) {
+            coastCasingPaint.strokeWidth = width * COAST_CASING_FACTOR
+            for (i in 0 until coast.size) drawWallEdge(canvas, coastCasingPaint, coast[i], ox, oy, s)
+        }
+        coastPaint.strokeWidth = width
+        for (i in 0 until coast.size) drawWallEdge(canvas, coastPaint, coast[i], ox, oy, s)
     }
 
     /** Faint line from the arrow edge of a line cell through the centres of its row, as on the ball. */
@@ -860,6 +965,10 @@ private const val BORDER_PER_RADIUS = 0.035f
 private const val WALL_WIDTH_PER_RADIUS = 0.07f
 private const val WALL_GLOW_FACTOR = 3.2f
 private const val WALL_GLOW_ALPHA = 0.4f
+
+// Coastline as on the ball: width relative to the circumradius, casing width relative to the line.
+private const val COAST_WIDTH_PER_RADIUS = 3.9f / 22f
+private const val COAST_CASING_FACTOR = 1.6f
 
 // Line rows bolder and more opaque than on the ball (0.045, 0.4), so they read on the small flat drawings:
 // about 3 dp wide at LARGE_CELL_RADIUS_DP.

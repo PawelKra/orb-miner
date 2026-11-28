@@ -38,7 +38,10 @@ import kotlin.random.Random
  * points at the edge their row starts through; once revealed, a faint line runs through the row.
  * Walls are glowing lines along cell edges, drawn on top of the cells and the row lines.
  *
- * Ocean cells are water with a soft sheen and no border or decal. Both cells of a portal pair
+ * Ocean cells are water with a soft sheen, two short waves and no border; a heavy coastline runs along
+ * every land edge that borders them. A covered cell without any other mark shows a small dot, and a
+ * revealed cell that shows nothing gets a soft outline close to its own fill, so that covered cells,
+ * cleared areas and the ocean read apart. Both cells of a portal pair
  * carry the same mark in the pair's colour: a ring with a dot on a covered cell, a thin ring along the
  * edge on a revealed or flagged one so the number stays readable. On a lock cell the mark is always the
  * thin ring, open below the padlock, so the padlock and its count stay clear. A cell whose lock is still closed
@@ -126,6 +129,16 @@ class SphereRenderer(
     private var frameCy = 0f
     private var frameFocal = 1f
 
+    /** Fill colour of each visible land cell in the current frame; the dot and the soft outline use it. */
+    private val fillColor = IntArray(cellCount)
+
+    // Screen ends and mean perspective scale of the edge last passed to projectEdge.
+    private var edgeX0 = 0f
+    private var edgeY0 = 0f
+    private var edgeX1 = 0f
+    private var edgeY1 = 0f
+    private var edgeScale = 0f
+
     private val path = Path()
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -133,6 +146,23 @@ class SphereRenderer(
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         color = palette.border
+    }
+
+    /** Soft outline of an empty revealed cell; its colour depends on the cell's fill. */
+    private val emptyBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    /** Normal border along one edge between an empty revealed cell and another land cell. */
+    private val sharedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = palette.border
+    }
+    private val coastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
     }
     private val wallGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -173,6 +203,9 @@ class SphereRenderer(
 
     /** Stroke width of the line through a line cell's row, in model units. */
     private val rowWidth: Float
+
+    /** Coastline stroke width in model units, derived from the mean cell size. */
+    private val coastWidth: Float
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val confettiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
@@ -269,6 +302,7 @@ class SphereRenderer(
         for (i in 0 until cellCount) radiusSum += cellRadius[i]
         wallWidth = radiusSum / max(1, cellCount) * WALL_WIDTH_PER_RADIUS
         rowWidth = radiusSum / max(1, cellCount) * ROW_WIDTH_PER_RADIUS
+        coastWidth = radiusSum / max(1, cellCount) * COAST_WIDTH_PER_RADIUS
 
         val random = Random(CONFETTI_SEED)
         for (p in 0 until CONFETTI_COUNT) {
@@ -409,37 +443,24 @@ class SphereRenderer(
         val visible = transformAndCull()
         sortBackToFront(visible)
         updateScopeMarks(board, highlightCell)
+
+        // The surface: cell fills with their borders and the scope highlight, the outlines of empty
+        // revealed cells (after every fill, so no fill drawn later covers them) and the ocean waves.
+        for (k in 0 until visible) {
+            val cell = order[k]
+            drawCell(canvas, cell, board, status, layout, fill = true, drawDecals = false)
+            // The highlight of an empty revealed cell follows its outline, in drawEmptyCellOutlines.
+            if (scopeMarked[cell] && !isEmptyRevealed(cell, board, layout)) drawScopeMark(canvas, cell)
+        }
+        if (board != null) drawEmptyCellOutlines(canvas, visible, board, layout)
+        if (layout != null) drawOceanWaves(canvas, visible, layout)
+
         if (palette.decalsOverGloss) {
-            // Cell fills with the scope highlight, then the gloss, then everything drawn on the cells.
-            for (k in 0 until visible) {
-                val cell = order[k]
-                drawCell(canvas, cell, board, status, layout, fill = true, drawDecals = false)
-                if (scopeMarked[cell]) drawScopeMark(canvas, cell)
-            }
+            // The gloss over the surface, then the coast and everything drawn on the cells.
             drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
-            for (k in 0 until visible) {
-                drawCell(canvas, order[k], board, status, layout, fill = false, drawDecals = true)
-            }
-            if (layout != null) {
-                if (board != null) drawLineRows(canvas, layout, board)
-                drawWalls(canvas, layout)
-            }
+            drawCellMarks(canvas, visible, board, status, layout)
         } else {
-            for (k in 0 until visible) {
-                val cell = order[k]
-                if (scopeMarked[cell]) {
-                    // The highlight goes between the fill and the decals of the cell.
-                    drawCell(canvas, cell, board, status, layout, fill = true, drawDecals = false)
-                    drawScopeMark(canvas, cell)
-                    drawCell(canvas, cell, board, status, layout, fill = false, drawDecals = true)
-                } else {
-                    drawCell(canvas, cell, board, status, layout, fill = true, drawDecals = true)
-                }
-            }
-            if (layout != null) {
-                if (board != null) drawLineRows(canvas, layout, board)
-                drawWalls(canvas, layout)
-            }
+            drawCellMarks(canvas, visible, board, status, layout)
             drawUnitShader(canvas, glossShader, cx, cy, radius, radius, 1f)
         }
 
@@ -755,16 +776,16 @@ class SphereRenderer(
 
         if (lost && cell == board.explodedCell) {
             val c = palette.explodedCell
-            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.4f)
+            if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.4f)
             if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.mineOnRed)
         } else if (board.isDetonated(cell)) {
             // A mine that cost a life earlier: darker red than the one that ended the game.
             val c = palette.detonatedCell
-            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.3f)
+            if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.3f)
             if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.mineOnRed)
         } else if (lost && mine && !flagged) {
             val c = palette.lostMineCell
-            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.25f)
+            if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.mine)
         } else if (revealed) {
             if (fill) {
@@ -772,10 +793,12 @@ class SphereRenderer(
                 val sheen = spec * lighting.revealedSheen
                 val lift = lighting.revealedLift
                 fillCell(
-                    canvas, projR,
+                    canvas, cell, projR,
                     revealedR[cell] * shade + lift.r + sheen,
                     revealedG[cell] * shade + lift.g + sheen,
                     revealedB[cell] * shade + lift.b + sheen,
+                    // An empty revealed cell gets its outline in drawEmptyCellOutlines.
+                    border = !isEmptyRevealed(cell, board, layout),
                 )
             }
             if (drawDecals && !mine) {
@@ -800,7 +823,7 @@ class SphereRenderer(
         } else if (lost && flagged && board.isWrongFlag(cell)) {
             // A flag on a safe cell: muted red cell and a greyed-out flag.
             val c = palette.wrongFlagCell
-            if (fill) fillLit(canvas, projR, c.r, c.g, c.b, light, spec, 0.25f)
+            if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawFlagDecal(canvas, cell, decalAlpha, palette.wrongPole, palette.wrongFlag)
         } else {
             if (fill) fillCovered(canvas, cell, projR, light, spec, rim)
@@ -809,6 +832,9 @@ class SphereRenderer(
                     drawFlagDecal(canvas, cell, decalAlpha, palette.pole, palette.flag)
                 } else if (!board.isLockOpen(cell)) {
                     drawLockDecal(canvas, cell, board, 1f, decalAlpha)
+                } else if (layout == null || !layout.isPortal(cell)) {
+                    // A covered cell with no other mark shows a dot: nothing is known about it yet.
+                    drawCoveredDot(canvas, cell, decalAlpha)
                 }
             }
         }
@@ -861,10 +887,11 @@ class SphereRenderer(
         val shade = l.coveredFlat + l.coveredLit * light
         val gloss = spec * l.coveredGloss
         fillCell(
-            canvas, projR,
+            canvas, cell, projR,
             baseR[cell] * shade + gloss + rim * l.rim.r,
             baseG[cell] * shade + gloss + rim * l.rim.g,
             baseB[cell] * shade + gloss + rim * l.rim.b,
+            border = true,
         )
     }
 
@@ -873,19 +900,108 @@ class SphereRenderer(
      * of strength [gloss].
      */
     private fun fillLit(
-        canvas: Canvas, projR: Float, r: Float, g: Float, b: Float, light: Float, spec: Float, gloss: Float,
+        canvas: Canvas, cell: Int, projR: Float, r: Float, g: Float, b: Float, light: Float, spec: Float,
+        gloss: Float,
     ) {
         val shade = lighting.coveredFlat + lighting.coveredLit * light
         val sheen = spec * gloss
-        fillCell(canvas, projR, r * shade + sheen, g * shade + sheen, b * shade + sheen)
+        fillCell(canvas, cell, projR, r * shade + sheen, g * shade + sheen, b * shade + sheen, border = true)
     }
 
-    /** One flat colour per cell, outlined with a thin border that separates touching cells. */
-    private fun fillCell(canvas: Canvas, projR: Float, r: Float, g: Float, b: Float) {
-        fillPaint.color = MathUtils.argb(1f, r, g, b)
+    /**
+     * One flat colour per cell, kept in [fillColor] for the marks drawn later, outlined with a thin
+     * border that separates touching cells when [border] is true.
+     */
+    private fun fillCell(canvas: Canvas, cell: Int, projR: Float, r: Float, g: Float, b: Float, border: Boolean) {
+        val color = MathUtils.argb(1f, r, g, b)
+        fillColor[cell] = color
+        fillPaint.color = color
         canvas.drawPath(path, fillPaint)
+        if (!border) return
         borderPaint.strokeWidth = borderWidth(projR)
         canvas.drawPath(path, borderPaint)
+    }
+
+    /**
+     * True for a revealed land cell that shows nothing: no number, no padlock and no mine, and not a far,
+     * line or portal cell. It gets the soft outline of [drawEmptyCellOutlines] instead of the border.
+     */
+    private fun isEmptyRevealed(cell: Int, board: MinesweeperBoard?, layout: BoardLayout?): Boolean {
+        if (board == null || !board.isRevealed(cell)) return false
+        if (layout != null &&
+            (!layout.isPresent(cell) || layout.isFar(cell) || layout.isLine(cell) || layout.isPortal(cell))
+        ) {
+            return false
+        }
+        if ((board.minesPlaced && board.isMine(cell)) || board.isDetonated(cell)) return false
+        return board.lockThreshold(cell) <= 0 && board.adjacentMines(cell) == 0
+    }
+
+    /**
+     * Outline of every visible empty revealed cell ([isEmptyRevealed]): the border mixed most of the way
+     * towards the cell's fill ([SpherePalette.emptyCellBorder]), so that a cleared area nearly merges into
+     * one surface. Along each edge shared with another land cell that is not empty, the normal border
+     * goes over it, so that cell keeps its full border there. Both are clipped to the empty cell; the
+     * other half of the edge keeps the border its own cell drew with its fill. The scope highlight of the
+     * cell follows, over the outline, as on the other cells it lies over their border.
+     */
+    private fun drawEmptyCellOutlines(canvas: Canvas, visible: Int, board: MinesweeperBoard, layout: BoardLayout?) {
+        val edgeNeighbor = geometry.edgeNeighbor
+        for (k in 0 until visible) {
+            val cell = order[k]
+            if (!isEmptyRevealed(cell, board, layout)) continue
+            buildCellPath(cell)
+            val projR = cellRadius[cell] * frameFocal / (SphereCamera.DISTANCE - rotated[cell * 3 + 2])
+            val width = borderWidth(projR)
+            canvas.save()
+            canvas.clipPath(path)
+            emptyBorderPaint.strokeWidth = width
+            emptyBorderPaint.color = palette.emptyCellBorder(fillColor[cell])
+            canvas.drawPath(path, emptyBorderPaint)
+            sharedBorderPaint.strokeWidth = width
+            val start = cornerStart[cell]
+            val count = cornerStart[cell + 1] - start
+            for (j in 0 until count) {
+                val other = edgeNeighbor[start + j]
+                if (layout != null && !layout.isPresent(other)) continue
+                if (isEmptyRevealed(other, board, layout)) continue
+                val next = if (j + 1 < count) j + 1 else 0
+                canvas.drawLine(
+                    cellScreen[j * 2], cellScreen[j * 2 + 1], cellScreen[next * 2], cellScreen[next * 2 + 1],
+                    sharedBorderPaint,
+                )
+            }
+            canvas.restore()
+            if (scopeMarked[cell]) drawScopeMark(canvas, cell)
+        }
+    }
+
+    /** Waves on every visible ocean cell, fixed on the ball and fading towards the horizon like the decals. */
+    private fun drawOceanWaves(canvas: Canvas, visible: Int, layout: BoardLayout) {
+        for (k in 0 until visible) {
+            val cell = order[k]
+            if (layout.isPresent(cell)) continue
+            val alpha = MathUtils.smoothstep(DECAL_FADE_START, DECAL_FADE_END, facing[cell])
+            if (alpha < MIN_DECAL_ALPHA || !setupDecal(cell)) continue
+            onDecal(canvas) { decals.drawWaves(canvas, alpha) }
+        }
+    }
+
+    /**
+     * Everything drawn over the surface, in this order: the coast, the digits and icons of every visible
+     * cell, the line rows and the walls.
+     */
+    private fun drawCellMarks(
+        canvas: Canvas, visible: Int, board: MinesweeperBoard?, status: GameStatus, layout: BoardLayout?,
+    ) {
+        if (layout != null) drawCoast(canvas, visible, layout)
+        for (k in 0 until visible) {
+            drawCell(canvas, order[k], board, status, layout, fill = false, drawDecals = true)
+        }
+        if (layout != null) {
+            if (board != null) drawLineRows(canvas, layout, board)
+            drawWalls(canvas, layout)
+        }
     }
 
     /** Cell outline width in pixels for a cell of projected radius [projR]: proportional, kept thin. */
@@ -1014,6 +1130,13 @@ class SphereRenderer(
         onDecal(canvas) { decals.drawPortalAroundLock(canvas, pair, alpha) }
     }
 
+    /** Dot of a covered cell without other marks, in a shade of the fill drawn for it this frame. */
+    private fun drawCoveredDot(canvas: Canvas, cell: Int, alpha: Float) {
+        if (alpha < MIN_DECAL_ALPHA || !setupDecal(cell)) return
+        val fill = fillColor[cell]
+        onDecal(canvas) { decals.drawCoveredDot(canvas, fill, alpha) }
+    }
+
     /** Flag fixed on the ball, in the given pole and pennant colours. */
     private fun drawFlagDecal(canvas: Canvas, cell: Int, alpha: Float, poleColor: Int, pennantColor: Int) {
         if (alpha < MIN_DECAL_ALPHA || !setupDecal(cell)) return
@@ -1087,6 +1210,23 @@ class SphereRenderer(
     }
 
     private fun drawWallSegment(canvas: Canvas, cornerA: Int, cornerB: Int) {
+        val alpha = projectEdge(cornerA, cornerB)
+        if (alpha < MIN_DECAL_ALPHA) return
+        val width = wallWidth * edgeScale
+        wallGlowPaint.strokeWidth = width * WALL_GLOW_FACTOR
+        wallGlowPaint.color = MathUtils.withAlpha(palette.wallGlow, alpha * WALL_GLOW_ALPHA)
+        canvas.drawLine(edgeX0, edgeY0, edgeX1, edgeY1, wallGlowPaint)
+        wallCorePaint.strokeWidth = width
+        wallCorePaint.color = MathUtils.withAlpha(palette.wallCore, alpha)
+        canvas.drawLine(edgeX0, edgeY0, edgeX1, edgeY1, wallCorePaint)
+    }
+
+    /**
+     * Projects the cell edge between corner indices [cornerA] and [cornerB] into [edgeX0], [edgeY0],
+     * [edgeX1], [edgeY1] and its mean perspective scale into [edgeScale]. Returns its fade towards the
+     * horizon (0..1); below [MIN_DECAL_ALPHA] the screen values are not set.
+     */
+    private fun projectEdge(cornerA: Int, cornerB: Int): Float {
         val m = matrix
         val d = SphereCamera.DISTANCE
         var p = cornerA * 3
@@ -1101,20 +1241,49 @@ class SphereRenderer(
         val fa = (d * az - 1f) / sqrt(ax * ax + ay * ay + (d - az) * (d - az))
         val fb = (d * bz - 1f) / sqrt(bx * bx + by * by + (d - bz) * (d - bz))
         val alpha = MathUtils.smoothstep(DECAL_FADE_START, DECAL_FADE_END, min(fa, fb))
-        if (alpha < MIN_DECAL_ALPHA) return
+        if (alpha < MIN_DECAL_ALPHA) return alpha
         val sa = frameFocal / (d - az)
         val sb = frameFocal / (d - bz)
-        val x0 = frameCx + ax * sa
-        val y0 = frameCy - ay * sa
-        val x1 = frameCx + bx * sb
-        val y1 = frameCy - by * sb
-        val width = wallWidth * (sa + sb) * 0.5f
-        wallGlowPaint.strokeWidth = width * WALL_GLOW_FACTOR
-        wallGlowPaint.color = MathUtils.withAlpha(palette.wallGlow, alpha * WALL_GLOW_ALPHA)
-        canvas.drawLine(x0, y0, x1, y1, wallGlowPaint)
-        wallCorePaint.strokeWidth = width
-        wallCorePaint.color = MathUtils.withAlpha(palette.wallCore, alpha)
-        canvas.drawLine(x0, y0, x1, y1, wallCorePaint)
+        edgeX0 = frameCx + ax * sa
+        edgeY0 = frameCy - ay * sa
+        edgeX1 = frameCx + bx * sb
+        edgeY1 = frameCy - by * sb
+        edgeScale = (sa + sb) * 0.5f
+        return alpha
+    }
+
+    // ------------------------------------------------------------------ coast
+
+    /**
+     * Coastline: a heavy line along every edge between a visible land cell and the ocean, over the casing
+     * of the palette when it has one. Each pass draws all edges, so the casing never covers the line
+     * where two edges meet. It fades towards the horizon like the walls.
+     */
+    private fun drawCoast(canvas: Canvas, visible: Int, layout: BoardLayout) {
+        if ((palette.coastCasing ushr 24) != 0) {
+            drawCoastPass(canvas, visible, layout, palette.coastCasing, coastWidth * COAST_CASING_FACTOR)
+        }
+        if ((palette.coast ushr 24) != 0) drawCoastPass(canvas, visible, layout, palette.coast, coastWidth)
+    }
+
+    /** Every coast edge of the visible land cells in [color], [width] model units wide. */
+    private fun drawCoastPass(canvas: Canvas, visible: Int, layout: BoardLayout, color: Int, width: Float) {
+        val edgeNeighbor = geometry.edgeNeighbor
+        val colorAlpha = (color ushr 24) / 255f
+        for (k in 0 until visible) {
+            val cell = order[k]
+            if (!layout.isPresent(cell)) continue
+            val start = cornerStart[cell]
+            val end = cornerStart[cell + 1]
+            for (c in start until end) {
+                if (layout.isPresent(edgeNeighbor[c])) continue
+                val alpha = projectEdge(c, if (c + 1 < end) c + 1 else start)
+                if (alpha < MIN_DECAL_ALPHA) continue
+                coastPaint.strokeWidth = width * edgeScale
+                coastPaint.color = MathUtils.withAlpha(color, alpha * colorAlpha)
+                canvas.drawLine(edgeX0, edgeY0, edgeX1, edgeY1, coastPaint)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ backdrop and effects
@@ -1243,6 +1412,11 @@ class SphereRenderer(
         private const val WALL_WIDTH_PER_RADIUS = 0.07f
         private const val WALL_GLOW_FACTOR = 3.2f
         private const val WALL_GLOW_ALPHA = 0.4f
+
+        // Coastline: width relative to the mean cell radius (circumradius), and the width of the casing
+        // under it relative to the line.
+        private const val COAST_WIDTH_PER_RADIUS = 3.9f / 22f
+        private const val COAST_CASING_FACTOR = 1.6f
 
         /** A digit switches to another edge only when that edge is this much flatter (|sin|, about 5 degrees). */
         private const val EDGE_HYSTERESIS = 0.09f

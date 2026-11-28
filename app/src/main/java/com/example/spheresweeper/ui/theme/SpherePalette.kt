@@ -59,6 +59,22 @@ class SpherePalette(
     /** Ocean colour at the south and at the north pole. */
     val oceanSouth: Rgb,
     val oceanNorth: Rgb,
+    /** Two short wavy strokes on every ocean cell, alpha included. */
+    val wave: Int,
+    /**
+     * Heavy line along every land edge that borders the ocean. [coastCasing] is a wider line under it;
+     * where the land is about as light as [coast], the casing keeps the coast visible. Alpha 0 draws none.
+     */
+    val coast: Int,
+    val coastCasing: Int,
+    /**
+     * Small dot in the middle of a covered cell without any other mark, so that unknown cells read apart
+     * from revealed ones. Its colour is the cell's lit fill with [coveredDotDarken] of black mixed in.
+     * When [coveredDotLighten] is above 0 and mixing in that share of white instead gives the higher
+     * contrast against the fill (on dimly lit dark cells), the dot takes the lighter colour.
+     */
+    val coveredDotDarken: Float,
+    val coveredDotLighten: Float,
     /** Index = number of adjacent mines, index 0 unused; larger numbers use the last colour. */
     val numbers: IntArray,
     /** Soft shadow under digits; alpha 0 draws none. */
@@ -124,6 +140,29 @@ class SpherePalette(
         require(halo.size == 4 && pool.size == 2 && core.size == 3 && gloss.size == 3)
         require(win.size == 5 && explosion.size == 5)
     }
+
+    /**
+     * Outline of a revealed cell that shows nothing (no number, padlock or mark), so that a cleared area
+     * nearly merges into one surface: [border] as it looks over [fill] (opaque ARGB), mixed
+     * [EMPTY_CELL_BORDER_FILL_SHARE] of the way towards [fill]. The result is opaque.
+     */
+    fun emptyCellBorder(fill: Int): Int {
+        val share = ((border ushr 24) / 255f) * (1f - EMPTY_CELL_BORDER_FILL_SHARE)
+        return (0xFF shl 24) or
+            (mixChannel(fill, border, 16, share) shl 16) or
+            (mixChannel(fill, border, 8, share) shl 8) or
+            mixChannel(fill, border, 0, share)
+    }
+}
+
+/** Share of the cell's own fill in the outline of an empty revealed cell, see [SpherePalette.emptyCellBorder]. */
+private const val EMPTY_CELL_BORDER_FILL_SHARE = 0.8f
+
+/** Channel at bit [shift] of [from], moved [share] of the way towards the same channel of [to]. */
+private fun mixChannel(from: Int, to: Int, shift: Int, share: Float): Int {
+    val a = (from shr shift) and 0xFF
+    val b = (to shr shift) and 0xFF
+    return (a + (b - a) * share + 0.5f).toInt().coerceIn(0, 255)
 }
 
 /** ARGB int from a 0xAARRGGBB literal. */

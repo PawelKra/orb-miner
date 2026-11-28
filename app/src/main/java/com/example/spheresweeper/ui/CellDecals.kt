@@ -11,12 +11,14 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
  * Paints the marks that sit on a cell: digits, the far ring, the line number and arrow, the portal
- * mark, closed and open padlocks, flags and mines. The ball renderer and flat previews (such as a
+ * mark, closed and open padlocks, flags, mines, the dot of a plain covered cell and the waves of an
+ * ocean cell. The ball renderer and flat previews (such as a
  * legend of cell types) share it, so both show exactly the same drawings.
  *
  * Every draw function works in decal space, independent of any sphere or board:
@@ -78,6 +80,12 @@ class CellDecals(
         close()
     }
 
+    /** Two short waves of one sine period each, left of and above the centre, then right of and below it. */
+    private val wavePath = Path().apply {
+        addWave(WAVE_A_X, WAVE_A_Y)
+        addWave(WAVE_B_X, WAVE_B_Y)
+    }
+
     /** Flag pennant. */
     private val pennantPath = Path().apply {
         moveTo(FLAG_POLE_X, FLAG_TOP)
@@ -101,6 +109,15 @@ class CellDecals(
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
+    private val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = WAVE_STROKE
+    }
+
+    /** Opacity of the palette's wave colour, multiplied by the alpha of [drawWaves]. */
+    private val waveAlpha = (palette.wave ushr 24) / 255f
 
     /** Per-number offsets that put the centre of the glyph's ink bounds on the decal origin. */
     private val digitX = FloatArray(MAX_NUMBER + 1)
@@ -346,6 +363,52 @@ class CellDecals(
         canvas.drawCircle(-MINE_BODY_RADIUS * 0.36f, -MINE_BODY_RADIUS * 0.36f, MINE_BODY_RADIUS * 0.22f, iconPaint)
     }
 
+    /**
+     * Small dot in the middle of a covered cell that shows no other mark. [fill] is the cell's fill as
+     * drawn (opaque ARGB); the dot is that fill darkened by the palette's coveredDotDarken, or lightened
+     * by coveredDotLighten where that stands out more against it.
+     */
+    fun drawCoveredDot(canvas: Canvas, fill: Int, alpha: Float) {
+        iconPaint.color = MathUtils.withAlpha(coveredDotColor(fill), alpha)
+        canvas.drawCircle(0f, 0f, COVERED_DOT_RADIUS, iconPaint)
+    }
+
+    /**
+     * Two short wavy strokes of an ocean cell in the palette's wave colour. They stay inside the
+     * inscribed circle, so they never cross into a neighbouring cell.
+     */
+    fun drawWaves(canvas: Canvas, alpha: Float) {
+        wavePaint.color = MathUtils.withAlpha(palette.wave, alpha * waveAlpha)
+        canvas.drawPath(wavePath, wavePaint)
+    }
+
+    /** Colour of the dot on a covered cell with fill [fill], see [drawCoveredDot]. */
+    private fun coveredDotColor(fill: Int): Int {
+        val r = ((fill shr 16) and 0xFF) / 255f
+        val g = ((fill shr 8) and 0xFF) / 255f
+        val b = (fill and 0xFF) / 255f
+        val keep = 1f - palette.coveredDotDarken
+        val dark = MathUtils.argb(1f, r * keep, g * keep, b * keep)
+        val lighten = palette.coveredDotLighten
+        if (lighten <= 0f) return dark
+        val light = MathUtils.argb(1f, r + (1f - r) * lighten, g + (1f - g) * lighten, b + (1f - b) * lighten)
+        // Contrast ratios as in WCAG: (lighter + 0.05) / (darker + 0.05).
+        val fillLevel = luminance(fill) + 0.05f
+        val darkContrast = fillLevel / (luminance(dark) + 0.05f)
+        val lightContrast = (luminance(light) + 0.05f) / fillLevel
+        return if (darkContrast >= lightContrast) dark else light
+    }
+
+    /** Appends one sine period centred at ([cx], [cy]) to this path as a polyline. */
+    private fun Path.addWave(cx: Float, cy: Float) {
+        for (i in 0..WAVE_SEGMENTS) {
+            val t = i.toFloat() / WAVE_SEGMENTS
+            val x = cx + (t * 2f - 1f) * WAVE_HALF_LENGTH
+            val y = cy + sin(t * 2f * PI.toFloat()) * WAVE_AMPLITUDE
+            if (i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+    }
+
     /** Soft shadow under a number at decal position (x, y); themes without a shadow skip it. */
     private fun drawDigitShadow(canvas: Canvas, text: String, x: Float, y: Float, alpha: Float) {
         if (palette.digitShadowAlpha <= 0f) return
@@ -446,7 +509,34 @@ class CellDecals(
         private const val MINE_SPIKE_LENGTH = 51f
         private const val MINE_SPIKE_STROKE = 9f
 
+        // Dot on a plain covered cell: 0.14 of a hexagon's circumradius, which is HALF_SIZE / cos 30 degrees.
+        private const val HEX_CIRCUM_RADIUS = 115.47f
+        private const val COVERED_DOT_RADIUS = 0.14f * HEX_CIRCUM_RADIUS
+
+        // Ocean waves, in 22nds of a hexagon's circumradius: each 14 long with an amplitude of 2.2,
+        // centred at (-6, -5) and (3, 5), drawn 1.6 wide with round caps.
+        private const val WAVE_HALF_LENGTH = 7f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_AMPLITUDE = 2.2f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_A_X = -6f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_A_Y = -5f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_B_X = 3f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_B_Y = 5f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_STROKE = 1.6f / 22f * HEX_CIRCUM_RADIUS
+        private const val WAVE_SEGMENTS = 16
+
         private val DIGITS = Array(MAX_NUMBER + 1) { it.toString() }
+
+        /** Relative luminance (WCAG) of an ARGB colour; alpha is ignored. */
+        private fun luminance(color: Int): Float =
+            0.2126f * linear((color shr 16) and 0xFF) +
+                0.7152f * linear((color shr 8) and 0xFF) +
+                0.0722f * linear(color and 0xFF)
+
+        /** sRGB channel value 0..255 to linear light 0..1. */
+        private fun linear(channel: Int): Float {
+            val c = channel / 255f
+            return if (c <= 0.04045f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+        }
 
         private const val SPIKES = 8
         private val SPIKE_COS = FloatArray(SPIKES) { cos(it * PI / 4.0).toFloat() }
