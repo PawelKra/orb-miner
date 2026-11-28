@@ -27,7 +27,11 @@ import com.example.spheresweeper.logic.GameStatus
 import com.example.spheresweeper.logic.HintPicker
 import com.example.spheresweeper.logic.LevelSpec
 import com.example.spheresweeper.logic.MatchEngine
+import com.example.spheresweeper.logic.MatchMode
 import com.example.spheresweeper.logic.MatchMoveKind
+import com.example.spheresweeper.logic.MatchRules
+import com.example.spheresweeper.logic.TerritoryRules
+import com.example.spheresweeper.logic.WarRules
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.MoveResult
 import com.example.spheresweeper.logic.NoGuessGenerator
@@ -51,7 +55,7 @@ enum class Screen { MENU, CAMPAIGN, GAME, HOW_TO, STATS }
 
 /**
  * What the current game is played on: a free game on a [BoardSize], a fixed campaign level or a
- * territory match for two players. The numbers the game needs before a board exists come from here.
+ * match for two players. The numbers the game needs before a board exists come from here.
  */
 sealed class GameConfig {
     abstract val frequency: Int
@@ -81,16 +85,28 @@ sealed class GameConfig {
     }
 
     /**
-     * Territory match ("Gra o teren") of two players taking turns on one phone, played by [MatchEngine]:
-     * a new free-game board of [size] on every start and [movesPerTurn] moves per turn for both players.
-     * A mine that goes off never ends a match, so there are no lives to show; there are no hints, no
-     * timer, and matches count neither in the statistics nor in the best times.
+     * Match of two players taking turns on one phone, played by [MatchEngine] on a new free-game board
+     * of [size] on every start. [mode] picks the rules: a territory match ("Gra o teren") with
+     * [movesPerTurn] moves per turn for both players, or a five-move war ("Wojna pięciu ruchów"), whose
+     * turns [WarRules] fixes and which ignores [movesPerTurn]. A mine that goes off never ends a match,
+     * so there are no lives to show; there are no hints, no timer, and matches count neither in the
+     * statistics nor in the best times.
      */
-    data class Match(val size: BoardSize, val movesPerTurn: Int) : GameConfig() {
+    data class Match(
+        val size: BoardSize,
+        val movesPerTurn: Int,
+        val mode: MatchMode = MatchMode.TERRITORY,
+    ) : GameConfig() {
         init {
             require(movesPerTurn in MatchEngine.MIN_MOVES_PER_TURN..MatchEngine.MAX_MOVES_PER_TURN) {
                 "moves per turn $movesPerTurn"
             }
+        }
+
+        /** Rules of a new match of this config. */
+        fun rules(): MatchRules = when (mode) {
+            MatchMode.TERRITORY -> TerritoryRules(movesPerTurn)
+            MatchMode.WAR -> WarRules
         }
 
         override val frequency: Int get() = size.frequency
@@ -99,6 +115,9 @@ sealed class GameConfig {
         override val hints: Int get() = 0
     }
 }
+
+/** Score change [points] of the move [id] of a war, made by [player]; see [GameViewModel.matchPoints]. */
+data class MatchPoints(val id: Int, val player: Int, val points: Int)
 
 /**
  * Feature cards of the current board, opened from the HUD and shown over the board one at a time:
@@ -253,8 +272,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     /**
-     * Territory match played on [board], or null outside a match. Created with the board, so both belong
-     * to the same game; every move of a match goes through it.
+     * Match played on [board], or null outside a match. Created with the board, so both belong to the
+     * same game; every move of a match goes through it.
      */
     var match by mutableStateOf<MatchEngine?>(null)
         private set
@@ -264,6 +283,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * clears it the board takes no moves, so the player who just moved cannot move for the next one.
      */
     var handoffTo by mutableIntStateOf(-1)
+        private set
+
+    /**
+     * Score change of the last move of a war, shown for a moment over the board, or null. Each move gets
+     * a new [MatchPoints.id], so equal changes in a row still show one after another.
+     */
+    var matchPoints by mutableStateOf<MatchPoints?>(null)
+        private set
+
+    /**
+     * [MatchPoints.id] of the last points the screen has shown, 0 for none. It outlives the screen's
+     * composition, so a screen built again (after a rotation) does not show the same points twice.
+     */
+    var matchPointsShownId: Int = 0
+        private set
+
+    /** The screen has shown the points [id]; see [matchPointsShownId]. */
+    fun markMatchPointsShown(id: Int) {
+        matchPointsShownId = id
+    }
+
+    /** Two-player mode the menu offers for the next match: the last one chosen, stored in [prefs]. */
+    var matchMode by mutableStateOf(prefs.matchMode ?: MatchMode.TERRITORY)
         private set
 
     /** Board size the menu offers for the next match: the last one chosen, stored in [prefs]. */
@@ -303,7 +345,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return board?.livesLeft ?: config.lives
         }
 
-    /** Cells [player] owns in the match, 0 outside a match; reading it subscribes the caller to board changes. */
+    /**
+     * Score of [player] in the match: cells owned in a territory match, points in a war; 0 outside a
+     * match. Reading it subscribes the caller to board changes.
+     */
     fun matchScore(player: Int): Int {
         boardVersion
         return match?.score(player) ?: 0
@@ -323,7 +368,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return match?.movesLeft ?: 0
         }
 
-    /** True once the last safe cell of the match is revealed; reading it subscribes the caller to board changes. */
+    /**
+     * Moves of the current turn of the match ([MatchEngine.turnMoves]); reading it subscribes the caller
+     * to board changes.
+     */
+    val matchTurnMoves: Int
+        get() {
+            boardVersion
+            return match?.turnMoves ?: 0
+        }
+
+    /** True during a tie-break turn of a war; reading it subscribes the caller to board changes. */
+    val matchTieBreak: Boolean
+        get() {
+            boardVersion
+            return match?.isTieBreak == true
+        }
+
+    /** True once the match has ended; reading it subscribes the caller to board changes. */
     val matchOver: Boolean
         get() {
             boardVersion
@@ -331,18 +393,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
 
     /**
-     * Mines nobody found in a finished match, which count for nobody; 0 while the match goes on and
-     * outside a match. Reading it subscribes the caller to board changes.
+     * Mines nobody found in a finished territory match, which count for nobody; 0 while the match goes
+     * on, in a war and outside a match. Reading it subscribes the caller to board changes.
      */
     val matchUnownedMines: Int
         get() {
             boardVersion
             val m = match ?: return 0
-            // Once every safe cell is revealed, the cells still hidden are the mines nobody found.
-            return if (m.isOver) m.hiddenCount else 0
+            // A territory match ends with every safe cell revealed, so the cells still hidden are mines.
+            return if (m.isOver && m.rules is TerritoryRules) m.hiddenCount else 0
         }
 
-    /** Player with more cells, -1 for equal scores ([MatchEngine.leader]); subscribes to board changes. */
+    /** Player with the higher score, -1 for equal scores ([MatchEngine.leader]); subscribes to board changes. */
     val matchLeader: Int
         get() {
             boardVersion
@@ -363,9 +425,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         start(GameConfig.Free(size))
     }
 
-    /** Starts a territory match with the size and moves per turn chosen in the menu. */
+    /**
+     * Starts a match of the mode, size and, for a territory match, moves per turn chosen in the menu. A
+     * war keeps the config valid with the fixed [WarRules.MOVES_PER_TURN].
+     */
     fun startMatch() {
-        start(GameConfig.Match(matchSize, matchMovesPerTurn))
+        val moves = when (matchMode) {
+            MatchMode.TERRITORY -> matchMovesPerTurn
+            MatchMode.WAR -> WarRules.MOVES_PER_TURN
+        }
+        start(GameConfig.Match(matchSize, moves, matchMode))
     }
 
     /** Starts campaign [level]; a locked level is ignored. */
@@ -462,6 +531,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         board = null
         layout = null
         match = null
+        matchPoints = null
+        matchPointsShownId = 0
         handoffTo = -1
         boardFeatures = emptyList()
         highlightCell = -1
@@ -521,6 +592,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         prefs.themeId = value.id
     }
 
+    /** Two-player mode of the matches started from the menu from now on; stored for the next launch. */
+    fun updateMatchMode(mode: MatchMode) {
+        matchMode = mode
+        prefs.matchMode = mode
+    }
+
     /** Board size of the matches started from the menu from now on; stored for the next launch. */
     fun updateMatchSize(size: BoardSize) {
         matchSize = size
@@ -535,9 +612,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * True while a match is under way: its board is on screen, a move has been made and the last safe
-     * cell is not revealed yet. Leaving or restarting the game then asks for confirmation first, since
-     * the match would be lost. Reading it subscribes the caller to board changes.
+     * True while a match is under way: its board is on screen, a move has been made and the match has not
+     * ended yet. Leaving or restarting the game then asks for confirmation first, since the match would be
+     * lost. Reading it subscribes the caller to board changes.
      */
     val matchInProgress: Boolean
         get() {
@@ -751,16 +828,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * One move of match [m] on [cell]: a reveal, or a claim of a mine when [claim] is true. A mine that
-     * goes off shakes the ball; the move that ends the match starts the confetti. After the last move of
-     * a turn the board waits behind the handoff panel for the next player ([handoffTo]). Moves of a match
-     * never start the timer, and a match never reaches [finishGame], so lives, hints, best times and
-     * statistics take no part.
+     * goes off shakes the ball; the move that ends the match starts the confetti. In a war the points of
+     * the move go to [matchPoints]. After the last move of a turn the board waits behind the handoff
+     * panel for the next player ([handoffTo]). Moves of a match never start the timer, and a match never
+     * reaches [finishGame], so lives, hints, best times and statistics take no part.
      */
     private fun matchMove(m: MatchEngine, cell: Int, claim: Boolean): Feedback {
         val move = if (claim) m.claim(cell) else m.reveal(cell)
         if (move.kind == MatchMoveKind.IGNORED) return Feedback.NONE
         highlightCell = -1
         playerMoved = true
+        if (m.rules is WarRules) {
+            matchPoints = MatchPoints((matchPoints?.id ?: 0) + 1, move.mover, move.points)
+        }
         boardVersion++
         if (move.kind == MatchMoveKind.EXPLOSION) startEffect(SphereEffect.MINE_HIT, cell)
         if (move.matchOver) {
@@ -892,7 +972,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         layout = game.layout
         board = game.board
         val current = config
-        match = if (current is GameConfig.Match) MatchEngine(game.board, current.movesPerTurn) else null
+        match = if (current is GameConfig.Match) MatchEngine(game.board, current.rules()) else null
+        matchPoints = null
+        matchPointsShownId = 0
         handoffTo = -1
         freeGameSpec = game.freeGame
         highlightCell = -1

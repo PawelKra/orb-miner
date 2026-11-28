@@ -16,17 +16,18 @@ import kotlin.math.roundToInt
  * - [lineCells]: cells whose number counts mines in a straight row of cells running from one of
  *   their edges, up to 2 * [frequency] cells long, instead of their neighbours. On a board with
  *   rooms they stand only at passages, at most one per passage, so the board often gets fewer.
- * - [islands]: islands the land is split into by the ocean, 0 for a sphere without ocean. At most
- *   [BoardLayout.maxIslandCount] for [frequency]; portals always join the islands.
+ * - [islands]: islands the land is split into by the ocean, 0 for a sphere without ocean. The ocean
+ *   then covers [OCEAN_SHARE] of the sphere. At most [BoardLayout.maxIslandCount] for [frequency] and
+ *   that share; portals always join the islands.
  * - [portals]: extra portal pairs on top of those that join the islands.
  * - [locks]: cells whose number stays hidden until enough cells are revealed. On a board with rooms
  *   they stand at passages into the next room and show their number once their own room is solved;
  *   only some passages qualify, so the board often gets fewer locks.
  * - [rooms]: rooms the land is split into, passed as the room count of [BoardLayout.generate]; 0
  *   leaves the land open. Rooms are separated by walls and joined by single-edge passages. Every
- *   size stays within [BoardLayout.maxRoomCount] for its [frequency] and [islands]. The counts give
- *   enough passages for about half of [lineCells] or more on average, while a room keeps over 30
- *   cells on average.
+ *   size stays within [BoardLayout.maxRoomCount] for its [frequency], [islands] and [OCEAN_SHARE].
+ *   The counts give enough passages for about half of [lineCells] or more on average, while a room
+ *   keeps over 30 cells on average.
  */
 enum class BoardSize(
     val frequency: Int,
@@ -65,6 +66,14 @@ enum class BoardSize(
     GIANT(
         frequency = 8, mines = 125, lives = 5, hints = 3, walls = 7, wallMaxLength = 14, farCells = 18, lineCells = 12,
         islands = 3, portals = 2, locks = 5, rooms = 11,
+    ),
+    MEGA(
+        frequency = 9, mines = 160, lives = 6, hints = 3, walls = 8, wallMaxLength = 16, farCells = 22, lineCells = 14,
+        islands = 4, portals = 2, locks = 6, rooms = 14,
+    ),
+    GARGANTUAN(
+        frequency = 10, mines = 200, lives = 7, hints = 4, walls = 9, wallMaxLength = 18, farCells = 27, lineCells = 16,
+        islands = 5, portals = 3, locks = 8, rooms = 17,
     );
 
     val cellCount: Int get() = 10 * frequency * frequency + 2
@@ -82,10 +91,20 @@ enum class BoardSize(
 
     /**
      * Mines expected before the board exists: [mines] without islands, otherwise [mineDensity] of the
-     * expected land ([Campaign.expectedLand]). The real count depends on the drawn ocean.
+     * expected land ([Campaign.expectedLand] with [OCEAN_SHARE]). The real count depends on the drawn
+     * ocean.
      */
     val expectedMines: Int
-        get() = if (islands == 0) mines else (mineDensity * Campaign.expectedLand(cellCount)).roundToInt()
+        get() = if (islands == 0) mines else (mineDensity * Campaign.expectedLand(cellCount, OCEAN_SHARE)).roundToInt()
+
+    companion object {
+        /**
+         * Share of the sphere the ocean covers in a free game with islands, passed to
+         * [BoardLayout.generate]. Smaller than [BoardLayout.CAMPAIGN_OCEAN_SHARE], so more of a free
+         * board stays in play.
+         */
+        val OCEAN_SHARE: ClosedFloatingPointRange<Double> = 0.10..0.20
+    }
 }
 
 /**

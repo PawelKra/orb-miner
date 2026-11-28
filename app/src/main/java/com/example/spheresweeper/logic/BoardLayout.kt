@@ -169,9 +169,15 @@ class BoardLayout private constructor(
          */
         const val MIN_ISLAND_CELLS = 19
 
-        /** Share of the cells the ocean covers when the board has islands: from a fifth to about a third. */
+        /**
+         * Share of the cells the ocean covers on a campaign board with islands: from a fifth to about a
+         * third. [CAMPAIGN_OCEAN_SHARE] is the default ocean share of [generate].
+         */
         const val MIN_OCEAN_SHARE = 0.20
         const val MAX_OCEAN_SHARE = 0.35
+
+        /** [MIN_OCEAN_SHARE]..[MAX_OCEAN_SHARE]: the ocean share of campaign levels. */
+        val CAMPAIGN_OCEAN_SHARE: ClosedFloatingPointRange<Double> = MIN_OCEAN_SHARE..MAX_OCEAN_SHARE
 
         /** Ocean pockets inside one island up to this size are filled in; they would read as holes. */
         private const val MAX_LAKE_CELLS = 3
@@ -218,22 +224,30 @@ class BoardLayout private constructor(
         fun maxLineLength(geometry: SphereGeometry): Int = 2 * geometry.frequency
 
         /**
-         * Most islands [generate] accepts on [geometry]: with the largest ocean share every island must
-         * still be able to grow to twice [MIN_ISLAND_CELLS]. 0 when even one island does not fit.
+         * Most islands [generate] accepts on [geometry] with [oceanShare]: with the largest ocean share
+         * every island must still be able to grow to twice [MIN_ISLAND_CELLS]. 0 when even one island
+         * does not fit.
          */
-        fun maxIslandCount(geometry: SphereGeometry): Int {
-            val land = geometry.cellCount - maxOceanCells(geometry.cellCount)
+        fun maxIslandCount(
+            geometry: SphereGeometry,
+            oceanShare: ClosedFloatingPointRange<Double> = CAMPAIGN_OCEAN_SHARE,
+        ): Int {
+            val land = geometry.cellCount - maxOceanCells(geometry.cellCount, oceanShare)
             if (land < MIN_ISLAND_CELLS) return 0
             return maxOf(1, land / (2 * MIN_ISLAND_CELLS))
         }
 
         /**
-         * Most rooms [generate] accepts on [geometry] with [islandCount] islands: the smallest land
-         * still gives every room twice [MIN_ROOM_CELLS] on average. At least 1.
+         * Most rooms [generate] accepts on [geometry] with [islandCount] islands and [oceanShare]: the
+         * smallest land still gives every room twice [MIN_ROOM_CELLS] on average. At least 1.
          */
-        fun maxRoomCount(geometry: SphereGeometry, islandCount: Int = 0): Int {
+        fun maxRoomCount(
+            geometry: SphereGeometry,
+            islandCount: Int = 0,
+            oceanShare: ClosedFloatingPointRange<Double> = CAMPAIGN_OCEAN_SHARE,
+        ): Int {
             val cellCount = geometry.cellCount
-            val land = if (islandCount > 0) cellCount - maxOceanCells(cellCount) else cellCount
+            val land = if (islandCount > 0) cellCount - maxOceanCells(cellCount, oceanShare) else cellCount
             return maxOf(1, land / (2 * MIN_ROOM_CELLS))
         }
 
@@ -242,9 +256,10 @@ class BoardLayout private constructor(
          * [roomCount] rooms, up to [wallCount] walls of [minLength]..[maxLength] edges, the portals, the
          * passages between rooms, [farCount] far cells and up to [lineCount] line cells.
          *
-         * [islandCount] 0 keeps the whole sphere as land. Otherwise the ocean covers
-         * [MIN_OCEAN_SHARE]..[MAX_OCEAN_SHARE] of the cells and every island has at least
-         * [minIslandSize] cells (see [growIslands]).
+         * [islandCount] 0 keeps the whole sphere as land. Otherwise the ocean covers [oceanShare] of the
+         * cells ([CAMPAIGN_OCEAN_SHARE] unless given) and every island has at least [minIslandSize] cells
+         * (see [growIslands]). The share changes how many cells the ocean takes, never how many values
+         * are drawn from [random].
          *
          * [roomCount] counts the rooms on the whole board; 0 or 1 leaves the land without rooms. Every
          * island holds at least one room, and the rest go to the islands with the most land per room
@@ -274,8 +289,8 @@ class BoardLayout private constructor(
          * depend on the later counts. With [islandCount], [portalCount] and [roomCount] 0 nothing is
          * drawn for these features, so such a layout depends only on the seed and the other counts.
          *
-         * @throws IllegalArgumentException when [islandCount] is above [maxIslandCount] or [roomCount]
-         *   above [maxRoomCount].
+         * @throws IllegalArgumentException when [oceanShare] is not a range within 0..1, [islandCount] is
+         *   above [maxIslandCount] or [roomCount] above [maxRoomCount] for that share.
          */
         fun generate(
             geometry: SphereGeometry,
@@ -288,17 +303,27 @@ class BoardLayout private constructor(
             islandCount: Int = 0,
             portalCount: Int = 0,
             roomCount: Int = 0,
+            oceanShare: ClosedFloatingPointRange<Double> = CAMPAIGN_OCEAN_SHARE,
         ): BoardLayout {
             val cellCount = geometry.cellCount
+            require(
+                oceanShare.start >= 0.0 && oceanShare.start <= oceanShare.endInclusive && oceanShare.endInclusive < 1.0,
+            ) { "ocean share $oceanShare is not a range within 0..1" }
             require(islandCount >= 0) { "negative island count $islandCount" }
-            require(islandCount <= maxIslandCount(geometry)) {
-                "$islandCount islands do not fit on $cellCount cells (at most ${maxIslandCount(geometry)})"
+            val maxIslands = maxIslandCount(geometry, oceanShare)
+            require(islandCount <= maxIslands) {
+                "$islandCount islands do not fit on $cellCount cells (at most $maxIslands)"
             }
             require(roomCount >= 0) { "negative room count $roomCount" }
-            require(roomCount <= maxRoomCount(geometry, islandCount)) {
-                "$roomCount rooms do not fit on $cellCount cells (at most ${maxRoomCount(geometry, islandCount)})"
+            val maxRooms = maxRoomCount(geometry, islandCount, oceanShare)
+            require(roomCount <= maxRooms) {
+                "$roomCount rooms do not fit on $cellCount cells (at most $maxRooms)"
             }
-            val islands = if (islandCount > 0) growIslands(geometry, islandCount, random) else IntArray(cellCount)
+            val islands = if (islandCount > 0) {
+                growIslands(geometry, islandCount, random, oceanShare)
+            } else {
+                IntArray(cellCount)
+            }
             val islandTotal = maxOf(1, islandCount)
 
             // Rooms come right after the islands; nothing below draws differently without them.
@@ -794,29 +819,37 @@ class BoardLayout private constructor(
         fun minIslandSize(landCells: Int, islandCount: Int): Int =
             maxOf(MIN_ISLAND_CELLS, landCells / (2 * islandCount))
 
-        /** Fewest ocean cells: [MIN_OCEAN_SHARE] of the cells rounded up, so the share never falls below it. */
-        private fun minOceanCells(cellCount: Int): Int {
-            val exact = cellCount * MIN_OCEAN_SHARE
+        /** Fewest ocean cells: the smallest [oceanShare] of the cells rounded up, so the share never falls below it. */
+        private fun minOceanCells(cellCount: Int, oceanShare: ClosedFloatingPointRange<Double>): Int {
+            val exact = cellCount * oceanShare.start
             val whole = exact.toInt()
             return if (whole < exact) whole + 1 else whole
         }
 
-        /** Most ocean cells: [MAX_OCEAN_SHARE] of the cells rounded down, so the share never goes above it. */
-        private fun maxOceanCells(cellCount: Int): Int = (cellCount * MAX_OCEAN_SHARE).toInt()
+        /** Most ocean cells: the largest [oceanShare] of the cells rounded down, so the share never goes above it. */
+        private fun maxOceanCells(cellCount: Int, oceanShare: ClosedFloatingPointRange<Double>): Int =
+            (cellCount * oceanShare.endInclusive).toInt()
 
         /**
          * Island index per cell, -1 for ocean.
          *
-         * The ocean size is drawn from [MIN_OCEAN_SHARE]..[MAX_OCEAN_SHARE] of the cells. Island seeds are
+         * The ocean size is drawn from [oceanShare] of the cells. Island seeds are
          * spread out: the first is random, each next one is drawn among the cells farthest from the seeds
          * so far. The islands then grow in turns, each by one random cell next to it, until the land
          * reaches its size. A cell joins an island only when no other island touches it, so islands stay
          * apart by at least one ocean cell and each one is connected. Small lakes (ocean pockets of up to
          * [MAX_LAKE_CELLS] cells touching a single island) become part of that island while the ocean
          * stays at its minimum share or above. A draw with an island below [minIslandSize] is thrown away
-         * and drawn again.
+         * and drawn again. The islands stop growing when no free cell can join any of them, so the ocean
+         * that keeps many islands apart can stay above the drawn size: on a small share most draws end
+         * above its smallest value.
          */
-        private fun growIslands(geometry: SphereGeometry, islandCount: Int, random: Random): IntArray {
+        private fun growIslands(
+            geometry: SphereGeometry,
+            islandCount: Int,
+            random: Random,
+            oceanShare: ClosedFloatingPointRange<Double>,
+        ): IntArray {
             val cellCount = geometry.cellCount
             val neighbors = geometry.neighbors
             val owner = IntArray(cellCount)
@@ -826,8 +859,8 @@ class BoardLayout private constructor(
             val queued = BooleanArray(islandCount * cellCount)
             val distance = IntArray(cellCount)
             val queue = IntArray(cellCount)
-            val minOcean = minOceanCells(cellCount)
-            val maxOcean = maxOceanCells(cellCount)
+            val minOcean = minOceanCells(cellCount, oceanShare)
+            val maxOcean = maxOceanCells(cellCount, oceanShare)
             repeat(ISLAND_ATTEMPTS) {
                 val landTarget = cellCount - (minOcean + random.nextInt(maxOcean - minOcean + 1))
                 owner.fill(-1)

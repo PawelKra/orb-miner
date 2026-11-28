@@ -116,7 +116,9 @@ class SphereRenderer(
     private val rotated = FloatArray(cellCount * 3)
     private val facing = FloatArray(cellCount)
     private val order = IntArray(cellCount)
-    private val depth = FloatArray(cellCount)
+
+    /** Sort keys of [sortBackToFront]: the depth in the high 32 bits, the cell in the low 32 bits. */
+    private val depthKeys = LongArray(cellCount)
     private val decalDst = FloatArray(8)
     private val decalMatrix = Matrix()
 
@@ -132,7 +134,7 @@ class SphereRenderer(
     private var frameCy = 0f
     private var frameFocal = 1f
 
-    /** Territory match of the current frame, or null; see [fillOwned]. */
+    /** Match of the current frame, or null; see [fillOwned]. */
     private var frameMatch: MatchEngine? = null
 
     /** Fill colour of each visible land cell in the current frame; the dot and the soft outline use it. */
@@ -403,9 +405,9 @@ class SphereRenderer(
      * Draws the ball. [board] may be null (decorative ball: every cell covered).
      * [nowNanos] is compared with [effectStartNanos] (both System.nanoTime()) to animate effects.
      * [highlightCell] is a far cell whose scope (board.neighbors) is highlighted, -1 for none.
-     * [match] is the territory match played on [board], or null; the cells a player owns are filled in
-     * the player's colour ([SpherePalette.playerCells]). A solved board of a match is the end of the match,
-     * not a single-player win: it gets no win halo, and its mines nobody found show as unowned mines.
+     * [match] is the match played on [board], or null; the cells a player owns are filled in the player's
+     * colour ([SpherePalette.playerCells]). A solved board of a match is no single-player win: it gets no
+     * win halo. Once the match is over, its mines nobody found show as unowned mines.
      */
     fun draw(
         scope: DrawScope,
@@ -521,27 +523,27 @@ class SphereRenderer(
             facing[i] = fc
             if (fc > CULL_EPSILON) {
                 order[visible] = i
-                depth[visible] = rz
                 visible++
             }
         }
         return visible
     }
 
-    /** Insertion sort by depth (ascending z = farthest first). Nearly sorted between frames anyway. */
+    /**
+     * Sorts the first [count] cells of [order] by rotated depth, ascending z (farthest first); cells of
+     * equal depth keep ascending cell order. [transformAndCull] lists the cells in cell order every
+     * frame, so the input is not sorted by depth: each cell becomes one long key, the depth as an int
+     * with the order of the float in the high half and the cell in the low half, and one primitive sort
+     * of the reused [depthKeys] orders them in O(n log n).
+     */
     private fun sortBackToFront(count: Int) {
-        for (a in 1 until count) {
-            val key = depth[a]
-            val value = order[a]
-            var b = a - 1
-            while (b >= 0 && depth[b] > key) {
-                depth[b + 1] = depth[b]
-                order[b + 1] = order[b]
-                b--
-            }
-            depth[b + 1] = key
-            order[b + 1] = value
+        val keys = depthKeys
+        for (k in 0 until count) {
+            val cell = order[k]
+            keys[k] = (sortableDepth(rotated[cell * 3 + 2]).toLong() shl 32) or cell.toLong()
         }
+        java.util.Arrays.sort(keys, 0, count)
+        for (k in 0 until count) order[k] = keys[k].toInt()
     }
 
     /** Projects the corners of [cell] and rebuilds [path] from them. */
@@ -845,24 +847,27 @@ class SphereRenderer(
             val c = palette.wrongFlagCell
             if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawFlagDecal(canvas, cell, decalAlpha, palette.wrongPole, palette.wrongFlag)
-        } else if (frameMatch != null && won && mine && !flagged) {
-            // The end of a territory match: a mine nobody found belongs to nobody and shows as a plain mine.
+        } else if (mine && frameMatch?.let { it.isOver && !it.isFound(cell) } == true) {
+            // The end of a match: a mine nobody found belongs to nobody and shows as a plain mine.
             val c = palette.lostMineCell
             if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.unownedMine)
         } else {
-            // In a territory match a covered cell has an owner only when it is a found mine.
-            val owner = frameMatch?.owner(cell) ?: MatchEngine.NO_OWNER
+            // In a match a covered cell has an owner only when it is a found mine.
+            val m = frameMatch
+            val owner = m?.owner(cell) ?: MatchEngine.NO_OWNER
+            // In a match a found mine is known through the engine: a solved board takes no more flags.
+            val knownMine = if (m != null) m.isFound(cell) else won && mine
             if (fill && owner >= 0) {
                 fillOwned(canvas, cell, projR, owner, light, spec, border = true)
             } else if (fill) {
                 fillCovered(canvas, cell, projR, light, spec, rim)
             }
             if (drawDecals) {
-                if (owner >= 0 && flagged) {
+                if (owner >= 0) {
                     // A found mine of a match, on its owner's cell: a flag that stands out on the player colours.
                     drawFlagDecal(canvas, cell, decalAlpha, palette.ownedPole, palette.ownedFlag)
-                } else if (flagged || (won && mine)) {
+                } else if (flagged || knownMine) {
                     drawFlagDecal(canvas, cell, decalAlpha, palette.pole, palette.flag)
                 } else if (!board.isLockOpen(cell)) {
                     drawLockDecal(canvas, cell, board, 1f, decalAlpha)
@@ -1530,6 +1535,16 @@ class SphereRenderer(
             SphereEffect.HINT -> HINT_NANOS
             SphereEffect.MINE_HIT, SphereEffect.EXPLOSION -> EXPLOSION_NANOS
             SphereEffect.WIN -> WIN_NANOS
+        }
+
+        /**
+         * An int whose signed order is the order of the finite float [z], with -0 and +0 equal: the bits
+         * of a positive float already sort as ints, and flipping all bits but the sign of a negative one
+         * reverses their order.
+         */
+        internal fun sortableDepth(z: Float): Int {
+            val bits = java.lang.Float.floatToRawIntBits(if (z == 0f) 0f else z)
+            return if (bits < 0) bits xor 0x7fffffff else bits
         }
     }
 }

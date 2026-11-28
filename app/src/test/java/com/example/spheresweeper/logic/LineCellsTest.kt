@@ -124,7 +124,7 @@ class LineCellsTest {
         val size = spec.size
         return BoardLayout.generate(
             geometry(size), if (spec.walls) size.walls else 0, size.wallMinLength, size.wallMaxLength, size.farCells,
-            random, size.lineCells, size.islands, size.portals, spec.rooms,
+            random, size.lineCells, size.islands, size.portals, spec.rooms, BoardSize.OCEAN_SHARE,
         )
     }
 

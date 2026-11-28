@@ -12,10 +12,16 @@ class IslandPortalTest {
     private val geometries: Map<BoardSize, SphereGeometry> =
         BoardSize.values().associateWith { SphereGeometry.build(it.frequency) }
 
-    private fun layout(size: BoardSize, seed: Int, islands: Int, portals: Int): BoardLayout =
+    private fun layout(
+        size: BoardSize,
+        seed: Int,
+        islands: Int,
+        portals: Int,
+        oceanShare: ClosedFloatingPointRange<Double> = BoardLayout.CAMPAIGN_OCEAN_SHARE,
+    ): BoardLayout =
         BoardLayout.generate(
             geometries.getValue(size), size.walls, size.wallMinLength, size.wallMaxLength, size.farCells,
-            Random(seed), size.lineCells, islands, portals,
+            Random(seed), size.lineCells, islands, portals, oceanShare = oceanShare,
         )
 
     @Test
@@ -212,11 +218,11 @@ class IslandPortalTest {
                 assertEquals("$size expected", size.mines, size.expectedMines)
                 continue
             }
-            val expectedLand = Campaign.expectedLand(size.cellCount)
+            val expectedLand = Campaign.expectedLand(size.cellCount, BoardSize.OCEAN_SHARE)
             assertEquals("$size expected", Math.round(size.mineDensity * expectedLand).toInt(), size.expectedMines)
             for (seed in 0 until 10) {
                 val label = "$size seed $seed"
-                val layout = layout(size, seed, size.islands, size.portals)
+                val layout = layout(size, seed, size.islands, size.portals, BoardSize.OCEAN_SHARE)
                 val land = layout.presentCount
                 val mines = size.minesFor(layout)
                 assertEquals(label, size.mineDensity, mines.toDouble() / land, 0.5 / land + 1e-9)

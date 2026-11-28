@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.GameStats
+import com.example.spheresweeper.logic.MatchMode
 
 /** Settings, best times and campaign progress stored locally in SharedPreferences. */
 class GamePreferences(context: Context) {
@@ -45,6 +46,17 @@ class GamePreferences(context: Context) {
             return BoardSize.values().firstOrNull { it.name == name }
         }
         set(value) = prefs.edit { putString(KEY_MATCH_SIZE, value?.name) }
+
+    /**
+     * Two-player mode last chosen, stored by its name, or null before the first choice and for a name
+     * this version does not know.
+     */
+    var matchMode: MatchMode?
+        get() {
+            val name = prefs.getString(KEY_MATCH_MODE, null) ?: return null
+            return MatchMode.values().firstOrNull { it.name == name }
+        }
+        set(value) = prefs.edit { putString(KEY_MATCH_MODE, value?.name) }
 
     /** Moves per turn last chosen for a two-player match, or null before the first choice. */
     var matchMovesPerTurn: Int?
@@ -87,6 +99,7 @@ class GamePreferences(context: Context) {
         const val KEY_THEME = "theme"
         const val KEY_MATCH_SIZE = "match_size"
         const val KEY_MATCH_MOVES = "match_moves_per_turn"
+        const val KEY_MATCH_MODE = "match_mode"
         const val KEY_RANDOM_WALLS = "random_walls"
         const val KEY_GAME_STATS = "game_stats"
         const val NO_TIME = -1L

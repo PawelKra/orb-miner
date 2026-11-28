@@ -8,6 +8,8 @@
     <string name="board_large">Large</string>
     <string name="board_huge">Huge</string>
     <string name="board_giant">Giant</string>
+    <string name="board_mega">Mega</string>
+    <string name="board_gargantuan">Gargantuan</string>
     <string name="board_details">%1$s · %2$s</string>
     <string name="board_details_lives">%1$s · %2$s · %3$s</string>
 

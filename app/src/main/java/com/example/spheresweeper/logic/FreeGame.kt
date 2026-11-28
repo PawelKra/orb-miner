@@ -37,7 +37,8 @@ object FreeGame {
     /**
      * Builds the game of [spec] on [geometry] (which must have the size's frequency). The ocean, rooms,
      * walls, portals, far cells, line cells, locks, the mines and the start cell all come from one
-     * [StableRandom] seeded with [FreeGameSpec.seed], the same way [Campaign.buildLevel] builds a level.
+     * [StableRandom] seeded with [FreeGameSpec.seed], the same way [Campaign.buildLevel] builds a level,
+     * except that the ocean covers [BoardSize.OCEAN_SHARE] of the sphere.
      * [FreeGameSpec.walls] false leaves out the size's walls and its rooms; every other count of the
      * size stays, and its locks then count the whole board. The mine count is [BoardSize.minesFor] of
      * the built layout. A spec without rooms places the mines with `forbidEmptyLines` of
@@ -59,7 +60,7 @@ object FreeGame {
         val random = StableRandom(spec.seed)
         val drawn = BoardLayout.generate(
             geometry, if (spec.walls) size.walls else 0, size.wallMinLength, size.wallMaxLength, size.farCells,
-            random, size.lineCells, size.islands, size.portals, spec.rooms,
+            random, size.lineCells, size.islands, size.portals, spec.rooms, BoardSize.OCEAN_SHARE,
         )
         val mines = size.minesFor(drawn)
         val generated = NoGuessGenerator.generate(
@@ -80,18 +81,23 @@ object FreeGame {
      * when an island cannot be split into the asked rooms or no portal fits, [NoGuessGenerator.generate]
      * when it runs out of layouts. An attempt also fails when its board is not [GameStatus.PLAYING]
      * after the start: on a small board with few mines the start can reveal every safe cell, and such
-     * a board is already [GameStatus.WON]. A new seed almost always succeeds, so a failure is retried up
-     * to [ATTEMPTS] times. Rooms cause most of these failures, so after that the game is drawn without
-     * rooms (the size's walls, ocean, portals and locks stay), again with up to [ATTEMPTS] seeds. A game
-     * without [walls] has no rooms from the first attempt. Only a size that fails every attempt, which
-     * points to a broken [BoardSize], passes the last error on.
+     * a board is already [GameStatus.WON]. It fails too when its ocean has more than [maxOceanCells]
+     * cells: [BoardLayout.generate] aims at [BoardSize.OCEAN_SHARE], but its islands can stop growing
+     * before they reach the land it drew, which leaves more ocean. The check lives here, not in the
+     * layout, because campaign levels are drawn by the same layout code and must not change. A new seed
+     * almost always succeeds, so a failure is retried up to [ATTEMPTS] times. Rooms cause most of these
+     * failures, so after that the game is drawn without rooms (the size's walls, ocean, portals and
+     * locks stay), again with up to [ATTEMPTS] seeds. A game without [walls] has no rooms from the first
+     * attempt. Only a size that fails every attempt, which points to a broken [BoardSize], passes the
+     * last error on.
      *
-     * The returned game is always [GameStatus.PLAYING], so it can start a [MatchEngine]. Its
-     * [PreparedFreeGame.spec] holds the seed and the room count of the attempt that succeeded, so
-     * [build] gives back the same game.
+     * The returned game is always [GameStatus.PLAYING] with at most [maxOceanCells] ocean cells, so it
+     * can start a [MatchEngine]. Its [PreparedFreeGame.spec] holds the seed and the room count of the
+     * attempt that succeeded, so [build] gives back the same game.
      *
      * @throws IllegalStateException or [IllegalArgumentException] with the error of the last attempt
-     *   when every attempt fails; a board that is not in play fails with [IllegalStateException].
+     *   when every attempt fails; a board that is not in play or has too much ocean fails with
+     *   [IllegalStateException].
      */
     fun draw(geometry: SphereGeometry, size: BoardSize, walls: Boolean, seeds: Random = Random.Default): PreparedFreeGame =
         draw(geometry, size, walls, seeds, ::build)
@@ -113,6 +119,11 @@ object FreeGame {
                 check(game.board.status == GameStatus.PLAYING) {
                     "the start of seed ${spec.seed} leaves the board ${game.board.status}"
                 }
+                val cells = game.layout.scopes.size
+                val ocean = cells - game.layout.presentCount
+                check(ocean <= maxOceanCells(cells)) {
+                    "the ocean of seed ${spec.seed} covers $ocean of $cells cells, above ${BoardSize.OCEAN_SHARE.endInclusive}"
+                }
                 return game
             } catch (e: CancellationException) {
                 throw e
@@ -124,4 +135,10 @@ object FreeGame {
         }
         throw checkNotNull(failure)
     }
+
+    /**
+     * Most ocean cells a drawn free game may have on a sphere of [cellCount] cells: the share
+     * [BoardSize.OCEAN_SHARE] ends at, rounded down to whole cells, so the share never goes above it.
+     */
+    internal fun maxOceanCells(cellCount: Int): Int = (cellCount * BoardSize.OCEAN_SHARE.endInclusive).toInt()
 }

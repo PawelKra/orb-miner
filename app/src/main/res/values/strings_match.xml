@@ -40,4 +40,20 @@
 
     <string name="how_to_match_title">Dwóch graczy</string>
     <string name="how_to_match">W grze o teren dwie osoby grają na zmianę na jednym telefonie. Odkryte pola i trafnie wskazane miny są Twoje. Pole błędnie wskazane jako mina i mina, która wybuchnie, idą do rywala. Gra kończy się z ostatnim bezpiecznym polem, a miny, których nikt nie znalazł, nie należą do nikogo. Wygrywa ten, kto zajmie więcej pól.</string>
+
+    <string name="match_mode">Tryb</string>
+    <string name="match_mode_territory">Teren</string>
+    <string name="match_mode_war">Wojna</string>
+
+    <string name="war_title">Wojna pięciu ruchów</string>
+    <string name="war_card_subtitle">Każdy gracz ma 5 ruchów. Więcej punktów wygrywa.</string>
+    <string name="war_rules">Najpierw gracz 1 robi swoje 5 ruchów, potem gracz 2. Odkryte pole daje tyle punktów, ile pokazuje jego liczba, i 1 punkt za każde pole odkryte razem z nim. Trafnie wskazana mina +3, błędnie wskazana −3, wybuch miny −5. Przy remisie każdy gracz robi jeszcze po jednym ruchu, aż ktoś prowadzi. Ściany jak w wolnej grze.</string>
+    <string name="war_score_desc">Gracz %1$d, punkty: %2$d</string>
+    <string name="war_score_turn_desc">Gracz %1$d, punkty: %2$d, teraz jego tura</string>
+    <string name="war_turn_tie_break">Dogrywka: ruch gracza %1$d</string>
+    <string name="war_result_subtitle">Tyle punktów zdobył każdy z graczy</string>
+    <string name="war_restart_text">Ta wojna przepadnie, a gracze zaczną na nowej planszy.</string>
+
+    <string name="how_to_war_title">Wojna pięciu ruchów</string>
+    <string name="how_to_war">Najpierw gracz 1 robi swoje 5 ruchów, a potem gracz 2 swoje 5. Odkryte pole daje tyle punktów, ile pokazuje jego liczba, i 1 punkt za każde pole odkryte razem z nim. Trafnie wskazana mina daje 3 punkty, błędnie wskazana zabiera 3, a wybuch miny zabiera 5. Wygrywa ten, kto ma więcej punktów. Przy remisie każdy robi jeszcze po jednym ruchu, aż ktoś wyjdzie na prowadzenie. Wojna kończy się od razu z ostatnim bezpiecznym polem, a miny, których nikt nie znalazł, nie dają punktów nikomu.</string>
 </resources>
