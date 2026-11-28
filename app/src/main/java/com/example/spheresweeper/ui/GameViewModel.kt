@@ -18,8 +18,16 @@ import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
+import com.example.spheresweeper.logic.FreeGame
+import com.example.spheresweeper.logic.FreeGameSpec
+import com.example.spheresweeper.logic.GameMode
+import com.example.spheresweeper.logic.GameRecord
+import com.example.spheresweeper.logic.GameStats
 import com.example.spheresweeper.logic.GameStatus
+import com.example.spheresweeper.logic.HintPicker
 import com.example.spheresweeper.logic.LevelSpec
+import com.example.spheresweeper.logic.MatchEngine
+import com.example.spheresweeper.logic.MatchMoveKind
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.MoveResult
 import com.example.spheresweeper.logic.NoGuessGenerator
@@ -28,7 +36,6 @@ import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import com.example.spheresweeper.ui.theme.GameTheme
 import com.example.spheresweeper.ui.theme.GameThemes
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,11 +47,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.acos
 import kotlin.math.sqrt
 
-enum class Screen { MENU, CAMPAIGN, GAME, HOW_TO }
+enum class Screen { MENU, CAMPAIGN, GAME, HOW_TO, STATS }
 
 /**
- * What the current game is played on: a free game on a [BoardSize] or a fixed campaign level.
- * The numbers the game needs before a board exists come from here.
+ * What the current game is played on: a free game on a [BoardSize], a fixed campaign level or a
+ * territory match for two players. The numbers the game needs before a board exists come from here.
  */
 sealed class GameConfig {
     abstract val frequency: Int
@@ -72,14 +79,32 @@ sealed class GameConfig {
         override val lives: Int get() = spec.lives
         override val hints: Int get() = spec.hints
     }
+
+    /**
+     * Territory match ("Gra o teren") of two players taking turns on one phone, played by [MatchEngine]:
+     * a new free-game board of [size] on every start and [movesPerTurn] moves per turn for both players.
+     * A mine that goes off never ends a match, so there are no lives to show; there are no hints, no
+     * timer, and matches count neither in the statistics nor in the best times.
+     */
+    data class Match(val size: BoardSize, val movesPerTurn: Int) : GameConfig() {
+        init {
+            require(movesPerTurn in MatchEngine.MIN_MOVES_PER_TURN..MatchEngine.MAX_MOVES_PER_TURN) {
+                "moves per turn $movesPerTurn"
+            }
+        }
+
+        override val frequency: Int get() = size.frequency
+        override val mines: Int get() = size.expectedMines
+        override val lives: Int get() = 1
+        override val hints: Int get() = 0
+    }
 }
 
 /**
- * Feature cards shown over the board, one at a time: [features] in order, [index] the one on screen.
- * [intro] cards introduce features the player has not seen yet, and closing one marks its feature as
- * seen. Cards opened from the HUD ([intro] false) leave the seen features as they are.
+ * Feature cards of the current board, opened from the HUD and shown over the board one at a time:
+ * [features] in order, [index] the one on screen.
  */
-data class FeatureCards(val features: List<BoardFeature>, val index: Int, val intro: Boolean) {
+data class FeatureCards(val features: List<BoardFeature>, val index: Int) {
     val current: BoardFeature get() = features[index]
 }
 
@@ -108,6 +133,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Board size or campaign level of the current (or last) game. */
     var config by mutableStateOf<GameConfig>(GameConfig.Free(BoardSize.SMALL))
+        private set
+
+    /**
+     * Seed, room count and walls of the free game on screen; [FreeGame.build] rebuilds the same board
+     * from it. Null before the first free game and while a campaign level is shown.
+     */
+    var freeGameSpec by mutableStateOf<FreeGameSpec?>(null)
         private set
 
     var geometry by mutableStateOf<SphereGeometry?>(null)
@@ -189,6 +221,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var theme by mutableStateOf(GameThemes.byId(prefs.themeId))
         private set
 
+    /** Whether free games get the walls and rooms of their board size. */
+    var randomWalls by mutableStateOf(prefs.randomWalls)
+        private set
+
     val bestTimes: SnapshotStateMap<BoardSize, Long> = mutableStateMapOf<BoardSize, Long>().also {
         it.putAll(prefs.loadBestTimes())
     }
@@ -196,6 +232,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     /** Best stars per campaign level. */
     var progress by mutableStateOf(CampaignProgress.parse(prefs.campaignProgress))
         private set
+
+    /** Statistics of every finished game, won or lost; [finishGame] adds each game once. */
+    var stats by mutableStateOf<GameStats>(prefs.gameStats)
+        private set
+
+    /** [gameId] of the last game added to [stats], so a game is never counted twice. */
+    private var statsRecordedFor = -1
 
     /** Stars of the finished campaign game, for the result card; null in free games and while playing. */
     var lastRecord by mutableStateOf<RecordResult?>(null)
@@ -209,11 +252,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var featureCards by mutableStateOf<FeatureCards?>(null)
         private set
 
-    /** Start cell of the current board, pulsed once the board is in view; -1 while no board exists. */
-    private var startCell = -1
+    /**
+     * Territory match played on [board], or null outside a match. Created with the board, so both belong
+     * to the same game; every move of a match goes through it.
+     */
+    var match by mutableStateOf<MatchEngine?>(null)
+        private set
 
-    /** Features whose introduction card the player has closed. */
-    private var seenFeatures: Set<BoardFeature> = prefs.seenFeatures
+    /**
+     * Player who has to take the phone, or -1. Set when a turn of a match ends; until [confirmHandoff]
+     * clears it the board takes no moves, so the player who just moved cannot move for the next one.
+     */
+    var handoffTo by mutableIntStateOf(-1)
+        private set
+
+    /** Board size the menu offers for the next match: the last one chosen, stored in [prefs]. */
+    var matchSize by mutableStateOf(prefs.matchSize ?: BoardSize.SMALL)
+        private set
+
+    /** Moves per turn the menu offers for the next match: the last number chosen, stored in [prefs]. */
+    var matchMovesPerTurn by mutableIntStateOf(
+        (prefs.matchMovesPerTurn ?: MatchEngine.DEFAULT_MOVES_PER_TURN)
+            .coerceIn(MatchEngine.MIN_MOVES_PER_TURN, MatchEngine.MAX_MOVES_PER_TURN),
+    )
+        private set
 
     private var timerStartRealtime = 0L
 
@@ -241,6 +303,52 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return board?.livesLeft ?: config.lives
         }
 
+    /** Cells [player] owns in the match, 0 outside a match; reading it subscribes the caller to board changes. */
+    fun matchScore(player: Int): Int {
+        boardVersion
+        return match?.score(player) ?: 0
+    }
+
+    /** Player whose turn it is in the match; reading it subscribes the caller to board changes. */
+    val matchPlayer: Int
+        get() {
+            boardVersion
+            return match?.currentPlayer ?: 0
+        }
+
+    /** Moves left in the current turn of the match; reading it subscribes the caller to board changes. */
+    val matchMovesLeft: Int
+        get() {
+            boardVersion
+            return match?.movesLeft ?: 0
+        }
+
+    /** True once the last safe cell of the match is revealed; reading it subscribes the caller to board changes. */
+    val matchOver: Boolean
+        get() {
+            boardVersion
+            return match?.isOver == true
+        }
+
+    /**
+     * Mines nobody found in a finished match, which count for nobody; 0 while the match goes on and
+     * outside a match. Reading it subscribes the caller to board changes.
+     */
+    val matchUnownedMines: Int
+        get() {
+            boardVersion
+            val m = match ?: return 0
+            // Once every safe cell is revealed, the cells still hidden are the mines nobody found.
+            return if (m.isOver) m.hiddenCount else 0
+        }
+
+    /** Player with more cells, -1 for equal scores ([MatchEngine.leader]); subscribes to board changes. */
+    val matchLeader: Int
+        get() {
+            boardVersion
+            return match?.leader ?: -1
+        }
+
     /** The level after the current one if it is open, or null (free game, last level of a branch). */
     val nextLevel: LevelSpec?
         get() {
@@ -253,6 +361,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     /** Starts a free game on [size]. */
     fun startGame(size: BoardSize) {
         start(GameConfig.Free(size))
+    }
+
+    /** Starts a territory match with the size and moves per turn chosen in the menu. */
+    fun startMatch() {
+        start(GameConfig.Match(matchSize, matchMovesPerTurn))
     }
 
     /** Starts campaign [level]; a locked level is ignored. */
@@ -310,12 +423,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun loadGame(keepBoard: Boolean) {
         val forConfig = config
+        val walls = randomWalls
         val cached = geometryCache[forConfig.frequency]
         loadJob?.cancel()
         stopTimer()
         featureCards = null
+        handoffTo = -1
         highlightCell = -1
-        startCell = -1
         pausedAtRealtime = 0L
         if (!keepBoard) clearBoard(cached)
         loadJob = scope.launch {
@@ -331,7 +445,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             // withContext drops the result once this job is cancelled, so a newer load always wins.
             val (built, game) = withContext(Dispatchers.Default) {
                 val g = cached ?: SphereGeometry.build(forConfig.frequency)
-                g to prepareGame(g, forConfig)
+                g to prepareGame(g, forConfig, walls)
             }
             slow?.cancel()
             geometryCache[forConfig.frequency] = built
@@ -347,6 +461,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         geometry = g
         board = null
         layout = null
+        match = null
+        handoffTo = -1
         boardFeatures = emptyList()
         highlightCell = -1
     }
@@ -358,6 +474,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     /** Opens the legend of cell marks and rules; back returns to the menu through [backToMenu]. */
     fun openHowTo() {
         screen = Screen.HOW_TO
+    }
+
+    /** Opens the statistics of finished games; back returns to the menu through [backToMenu]. */
+    fun openStats() {
+        screen = Screen.STATS
     }
 
     fun backToMenu() {
@@ -389,40 +510,70 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         prefs.hapticsEnabled = enabled
     }
 
+    /** Free games started from now on are drawn with ([enabled]) or without walls and rooms. */
+    fun updateRandomWalls(enabled: Boolean) {
+        randomWalls = enabled
+        prefs.randomWalls = enabled
+    }
+
     fun updateTheme(value: GameTheme) {
         theme = value
         prefs.themeId = value.id
     }
 
+    /** Board size of the matches started from the menu from now on; stored for the next launch. */
+    fun updateMatchSize(size: BoardSize) {
+        matchSize = size
+        prefs.matchSize = size
+    }
+
+    /** Moves per turn of the matches started from now on, kept within the allowed range and stored. */
+    fun updateMatchMovesPerTurn(moves: Int) {
+        val value = moves.coerceIn(MatchEngine.MIN_MOVES_PER_TURN, MatchEngine.MAX_MOVES_PER_TURN)
+        matchMovesPerTurn = value
+        prefs.matchMovesPerTurn = value
+    }
+
+    /**
+     * True while a match is under way: its board is on screen, a move has been made and the last safe
+     * cell is not revealed yet. Leaving or restarting the game then asks for confirmation first, since
+     * the match would be lost. Reading it subscribes the caller to board changes.
+     */
+    val matchInProgress: Boolean
+        get() {
+            boardVersion
+            val m = match ?: return false
+            return screen == Screen.GAME && board != null && !loading && playerMoved && !m.isOver
+        }
+
+    /** The next player has the phone: the board of the match takes moves again. */
+    fun confirmHandoff() {
+        handoffTo = -1
+    }
+
     // ---------------------------------------------------------------- feature cards
 
     /**
-     * Opens the cards of every feature of the current board, seen before or not, and pauses a running
-     * timer. Does nothing when the board has no features or cards are already open.
+     * Opens the cards of every feature of the current board and pauses a running timer. Does nothing
+     * when the board has no features or cards are already open.
      */
     fun openFeatureHelp() {
         if (screen != Screen.GAME || loading || featureCards != null || boardFeatures.isEmpty()) return
-        featureCards = FeatureCards(boardFeatures, 0, intro = false)
+        featureCards = FeatureCards(boardFeatures, 0)
         pauseTimer()
     }
 
     /**
-     * Closes the card on screen and shows the next one. Closing an intro card stores its feature as
-     * seen. After the last card the board takes moves again and a paused timer goes on. Closing the
-     * last intro card pulses the start cell, which the cards covered when the board appeared.
+     * Closes the card on screen and shows the next one. After the last card the board takes moves again
+     * and a paused timer goes on.
      */
     fun closeFeatureCard() {
         val cards = featureCards ?: return
-        if (cards.intro && cards.current !in seenFeatures) {
-            seenFeatures = seenFeatures + cards.current
-            prefs.seenFeatures = seenFeatures
-        }
         if (cards.index + 1 < cards.features.size) {
             featureCards = cards.copy(index = cards.index + 1)
         } else {
             featureCards = null
             resumeTimer()
-            if (cards.intro && startCell >= 0) startEffect(SphereEffect.HINT, startCell)
         }
     }
 
@@ -441,7 +592,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Single tap in double-tap mode (delayed, or the first tap of a broken double tap). On a revealed
      * far cell it only switches the highlight of its scope on or off (see [highlightCell]). On any
-     * other cell it clears the highlight and reveals the cell if it is covered.
+     * other cell it clears the highlight and reveals the cell if it is covered; in a match the reveal
+     * is a move of [matchMove].
      */
     fun singleTap(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
@@ -450,16 +602,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return Feedback.NONE
         }
         highlightCell = -1
+        match?.let { return matchMove(it, cell, claim = false) }
         return afterMove(b.reveal(cell), Feedback.NONE)
     }
 
     /**
      * Double tap: flag a covered cell, chord a revealed number. A double tap on another cell than the
      * highlighted one clears the highlight; on the highlighted cell only a chord that acts clears it.
+     * In a match a double tap on a covered cell claims it as a mine ([matchMove]); there are no chords.
      */
     fun doubleTap(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
         if (cell != highlightCell) highlightCell = -1
+        match?.let { return if (b.isRevealed(cell)) Feedback.NONE else matchMove(it, cell, claim = true) }
         return if (b.isRevealed(cell)) chordOn(b, cell) else toggleFlagOn(b, cell)
     }
 
@@ -468,9 +623,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * they must all be mines ([MinesweeperBoard.autoFlagCells]); otherwise nothing changes and the
      * result is [Feedback.REJECT], also for a closed lock. A revealed 0 is ignored without feedback.
      * On a covered cell it toggles the flag in long-press mode and does nothing in double-tap mode.
+     * In a match a long press in long-press mode claims a covered cell as a mine ([matchMove]); there
+     * are no automatic flags, since one gesture would make several moves.
      */
     fun longPress(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
+        match?.let {
+            return if (!b.isRevealed(cell) && flagByLongPress) matchMove(it, cell, claim = true) else Feedback.NONE
+        }
         if (b.isRevealed(cell)) return autoFlagOn(b, cell)
         return if (flagByLongPress) toggleFlagOn(b, cell) else Feedback.NONE
     }
@@ -481,10 +641,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * A revealed far cell chords only when the chord would reveal something ([MinesweeperBoard.canChord]:
      * as many known mines in its scope as its number and at least one covered cell without a flag).
      * Otherwise the tap switches the highlight of its scope on or off, like [singleTap] does. A tap on
-     * any other cell clears the highlight.
+     * any other cell clears the highlight. In a match there are no chords: a tap on a revealed far cell
+     * switches its highlight, and a tap on a covered cell reveals it as a move of [matchMove].
      */
     fun tapImmediate(cell: Int, forGame: Int): Feedback {
         val b = activeBoard(cell, forGame) ?: return Feedback.NONE
+        val m = match
+        if (m != null) {
+            if (b.isRevealed(cell)) {
+                if (isFarCell(cell)) toggleHighlight(cell)
+                return Feedback.NONE
+            }
+            highlightCell = -1
+            return matchMove(m, cell, claim = false)
+        }
         if (b.isRevealed(cell) && isFarCell(cell) && !b.canChord(cell)) {
             toggleHighlight(cell)
             return Feedback.NONE
@@ -494,37 +664,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Reveals a safe covered cell for the player, preferring cells next to the revealed area and
-     * close to the front of the ball, then turns the ball so the cell faces the player.
+     * Opens a safe cell for the player, chosen by [HintPicker]: a flag on a safe cell first, so a wrong
+     * flag is always pointed out, otherwise a covered safe cell, preferring cells next to the revealed
+     * area and close to the front of the ball. A picked flag is removed before the cell is revealed. The
+     * ball then turns so the cell faces the player. Matches have no hints.
      */
     fun useHint(): Feedback {
         val b = board ?: return Feedback.NONE
         val g = geometry ?: return Feedback.NONE
         if (screen != Screen.GAME || b.status != GameStatus.PLAYING || hintsLeft <= 0) return Feedback.NONE
-        if (loading || featureCards != null) return Feedback.NONE
-        val cell = pickHintCell(b, g)
+        if (loading || featureCards != null || match != null) return Feedback.NONE
+        val cell = HintPicker.pick(b, g.neighbors) { facing(g, it) }
         if (cell < 0) return Feedback.NONE
         hintsLeft--
+        if (b.isFlagged(cell)) b.toggleFlag(cell)
         startEffect(SphereEffect.HINT, cell)
         focusOn(g, cell)
         return afterMove(b.reveal(cell), Feedback.CHORD)
     }
 
-    private fun pickHintCell(b: MinesweeperBoard, g: SphereGeometry): Int {
-        var best = -1
-        var bestScore = Float.NEGATIVE_INFINITY
-        for (cell in 0 until b.cellCount) {
-            if (!b.isPresent(cell) || b.isMine(cell) || b.isRevealed(cell) || b.isFlagged(cell)) continue
-            orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
-            // Facing the viewer counts in [-1, 1]; touching the revealed area outweighs it.
-            var score = scratch[2]
-            if (g.neighbors[cell].any { b.isRevealed(it) }) score += 2f
-            if (score > bestScore) {
-                bestScore = score
-                best = cell
-            }
-        }
-        return best
+    /** How much [cell] faces the viewer in the current [orientation], in -1..1. */
+    private fun facing(g: SphereGeometry, cell: Int): Float {
+        orientation.rotate(g.centers[cell * 3], g.centers[cell * 3 + 1], g.centers[cell * 3 + 2], scratch)
+        return scratch[2]
     }
 
     /**
@@ -572,15 +734,46 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * The board a move on [cell] applies to, or null when the move must be ignored: another screen or
-     * game, a board kept in view while the next one loads, a finished game, open feature cards, or a
-     * cell that is not in play (out of range or ocean).
+     * game, a board kept in view while the next one loads, a finished game or match, open feature cards,
+     * a match waiting for the next player ([handoffTo]), or a cell that is not in play (out of range or
+     * ocean).
      */
     private fun activeBoard(cell: Int, forGame: Int): MinesweeperBoard? {
         val b = board ?: return null
         if (screen != Screen.GAME || forGame != gameId || loading || featureCards != null) return null
+        if (handoffTo >= 0) return null
         if (cell < 0 || cell >= b.cellCount || !b.isPresent(cell)) return null
+        val m = match
+        if (m != null) return if (m.isOver) null else b
         if (b.status == GameStatus.WON || b.status == GameStatus.LOST) return null
         return b
+    }
+
+    /**
+     * One move of match [m] on [cell]: a reveal, or a claim of a mine when [claim] is true. A mine that
+     * goes off shakes the ball; the move that ends the match starts the confetti. After the last move of
+     * a turn the board waits behind the handoff panel for the next player ([handoffTo]). Moves of a match
+     * never start the timer, and a match never reaches [finishGame], so lives, hints, best times and
+     * statistics take no part.
+     */
+    private fun matchMove(m: MatchEngine, cell: Int, claim: Boolean): Feedback {
+        val move = if (claim) m.claim(cell) else m.reveal(cell)
+        if (move.kind == MatchMoveKind.IGNORED) return Feedback.NONE
+        highlightCell = -1
+        playerMoved = true
+        boardVersion++
+        if (move.kind == MatchMoveKind.EXPLOSION) startEffect(SphereEffect.MINE_HIT, cell)
+        if (move.matchOver) {
+            startEffect(SphereEffect.WIN, -1)
+        } else if (move.turnEnded) {
+            handoffTo = m.currentPlayer
+        }
+        return when (move.kind) {
+            MatchMoveKind.EXPLOSION -> Feedback.EXPLOSION
+            MatchMoveKind.MINE_FOUND -> Feedback.FLAG
+            MatchMoveKind.WRONG_CLAIM -> Feedback.REJECT
+            MatchMoveKind.REVEAL, MatchMoveKind.IGNORED -> Feedback.NONE
+        }
     }
 
     private fun toggleFlagOn(b: MinesweeperBoard, cell: Int): Feedback {
@@ -645,76 +838,46 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------------------------------------------------------------- lifecycle of a game
 
-    /** Board features and a board already opened at [start], ready to be shown. */
-    private class PreparedGame(val layout: BoardLayout, val board: MinesweeperBoard, val start: Int)
+    /**
+     * Board features and a board already opened at [start], ready to be shown. [freeGame] is the spec
+     * of a free game, null for a campaign level and a match.
+     */
+    private class PreparedGame(
+        val layout: BoardLayout,
+        val board: MinesweeperBoard,
+        val start: Int,
+        val freeGame: FreeGameSpec?,
+    )
 
     /**
      * Builds a game for [forConfig] on [g] (which has its frequency) without touching view-model
      * state, so it can run on any thread. Mines come from [NoGuessGenerator], which guarantees that
-     * the whole board can be solved from the start cell by logic alone, and the start cell is
-     * revealed right away. A free game draws a new board every time, with the ocean, rooms, portals and
-     * locks of its [BoardSize] and the size's mine density on the drawn land ([BoardSize.minesFor]); a
-     * level is built from its seed.
+     * the whole board can be solved from the start cell by logic alone, and the start cell is revealed
+     * right away. A free game draws a new board from a fresh seed every time ([FreeGame.draw]), with
+     * the ocean, portals and locks of its [BoardSize] and, when [walls] is true, its walls and rooms.
+     * A match draws its board the same way, but keeps no spec, since matches are not recorded. A level
+     * is built from its own seed and ignores [walls].
      */
-    private fun prepareGame(g: SphereGeometry, forConfig: GameConfig): PreparedGame = when (forConfig) {
-        is GameConfig.Free -> prepareRandomGame(g, forConfig.size)
+    private fun prepareGame(g: SphereGeometry, forConfig: GameConfig, walls: Boolean): PreparedGame = when (forConfig) {
+        is GameConfig.Free -> {
+            val game = FreeGame.draw(g, forConfig.size, walls)
+            PreparedGame(game.layout, game.board, game.start, game.spec)
+        }
+        is GameConfig.Match -> {
+            val game = FreeGame.draw(g, forConfig.size, walls)
+            PreparedGame(game.layout, game.board, game.start, null)
+        }
         is GameConfig.Level -> {
             val level = Campaign.buildLevel(forConfig.spec, g)
-            PreparedGame(level.layout, level.board, level.start)
+            PreparedGame(level.layout, level.board, level.start, null)
         }
-    }
-
-    /**
-     * A free game of [size] on [g], drawn with fresh randomness on every attempt. Both generators can
-     * fail on a rare draw: [BoardLayout.generate] when an island cannot be split into the asked rooms or
-     * no portal fits, [NoGuessGenerator.generate] when it runs out of layouts. A new draw almost always
-     * succeeds, so a failure is retried up to [RANDOM_GAME_ATTEMPTS] times. Rooms cause most of these
-     * failures, so after that the game is drawn without rooms (the size's walls, ocean, portals and
-     * locks stay; the locks then count the whole board), again with up to [RANDOM_GAME_ATTEMPTS] draws.
-     * Only a size that fails every draw, which points to a broken [BoardSize], passes the last error
-     * on. Campaign levels never come here: they are built from fixed seeds that the tests cover.
-     */
-    private fun prepareRandomGame(g: SphereGeometry, size: BoardSize): PreparedGame {
-        var failure: RuntimeException? = null
-        for (attempt in 0 until 2 * RANDOM_GAME_ATTEMPTS) {
-            val roomCount = if (attempt < RANDOM_GAME_ATTEMPTS) size.rooms else 0
-            try {
-                return drawRandomGame(g, size, roomCount)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: IllegalStateException) {
-                failure = e
-            } catch (e: IllegalArgumentException) {
-                failure = e
-            }
-        }
-        throw checkNotNull(failure)
-    }
-
-    /** One draw of a free game of [size] on [g] with [roomCount] rooms; throws when a generator fails. */
-    private fun drawRandomGame(g: SphereGeometry, size: BoardSize, roomCount: Int): PreparedGame {
-        val newLayout = BoardLayout.generate(
-            g, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells,
-            lineCount = size.lineCells, islandCount = size.islands, portalCount = size.portals,
-            roomCount = roomCount,
-        )
-        val mines = size.minesFor(newLayout)
-        val generated = NoGuessGenerator.generate(newLayout, mines, lockCount = size.locks)
-        val started = MinesweeperBoard(
-            newLayout.scopes, mines, lives = size.lives,
-            present = newLayout.presentMask(), lockThresholds = generated.lockThresholds,
-            lockRegions = generated.lockRegions,
-        )
-        started.startWith(generated.mines, generated.start)
-        return PreparedGame(newLayout, started, generated.start)
     }
 
     /**
      * Shows [game], built off the main thread by [loadGame] for the current [geometry] and [config].
      * Board and [gameId] change together, so moves meant for the old board are ignored. The ball
-     * turns at once so the start cell faces the player, and a hint pulse marks it. Features of the
-     * board the player has not seen yet open their intro cards, in [BoardFeature] order, before the
-     * first move; the pulse then waits until the last card closes.
+     * turns at once so the start cell faces the player, and a hint pulse marks it; the board takes
+     * moves straight away. For a match the board comes with a new [MatchEngine], with player 1 to move.
      */
     private fun newBoard(game: PreparedGame) {
         val g = geometry ?: return
@@ -728,21 +891,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         hintsLeft = config.hints
         layout = game.layout
         board = game.board
+        val current = config
+        match = if (current is GameConfig.Match) MatchEngine(game.board, current.movesPerTurn) else null
+        handoffTo = -1
+        freeGameSpec = game.freeGame
         highlightCell = -1
         pausedAtRealtime = 0L
-        val features = BoardFeatures.of(game.layout, game.board).toList()
-        boardFeatures = features
-        val pendingIntro = features.filter { it !in seenFeatures }
-        featureCards = if (pendingIntro.isEmpty()) null else FeatureCards(pendingIntro, 0, intro = true)
+        boardFeatures = BoardFeatures.of(game.layout, game.board).toList()
+        featureCards = null
         gameId++
         boardVersion++
-        startCell = game.start
         focusOn(g, game.start, animate = false)
-        if (featureCards == null) {
-            startEffect(SphereEffect.HINT, game.start)
-        } else {
-            startEffect(SphereEffect.NONE, -1)
-        }
+        startEffect(SphereEffect.HINT, game.start)
     }
 
     private fun startTimer() {
@@ -782,7 +942,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         launchTicker()
     }
 
+    /** Ends a single-player game: time, effect, best time, stars and statistics. Never runs for a match. */
     private fun finishGame(won: Boolean) {
+        if (config is GameConfig.Match) return
         stopTimer()
         highlightCell = -1
         // At least 1 ms so that a stored best time is always a valid positive value.
@@ -805,7 +967,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             is GameConfig.Level -> recordLevel(current.spec, won)
+            is GameConfig.Match -> Unit
         }
+        recordStats(won, elapsed)
+    }
+
+    /**
+     * Adds the finished game to [stats] and stores them: its mode, result, [elapsed] time, the lives it
+     * lost and the hints it used (counted as in [recordLevel]). A game already recorded (same [gameId])
+     * is skipped, and so is a free game without a matching [freeGameSpec] or a level unknown to
+     * [Campaign], since neither can name what was played.
+     */
+    private fun recordStats(won: Boolean, elapsed: Long) {
+        val b = board ?: return
+        if (statsRecordedFor == gameId) return
+        val mode = when (val current = config) {
+            is GameConfig.Free -> {
+                val spec = freeGameSpec?.takeIf { it.size == current.size } ?: return
+                GameMode.Free(spec.size, spec.seed, spec.rooms, spec.walls)
+            }
+            is GameConfig.Level -> {
+                if (Campaign.byId(current.spec.id) == null) return
+                GameMode.Level(current.spec.id)
+            }
+            // Matches are not recorded.
+            is GameConfig.Match -> return
+        }
+        statsRecordedFor = gameId
+        val hintsUsed = (config.hints - hintsLeft).coerceAtLeast(0)
+        val record = GameRecord(
+            finishedAt = System.currentTimeMillis().coerceAtLeast(0L),
+            mode = mode,
+            won = won,
+            timeMillis = elapsed,
+            livesLost = b.detonatedCount,
+            hintsUsed = hintsUsed,
+        )
+        stats = stats.add(record)
+        prefs.gameStats = stats
     }
 
     /**
@@ -841,9 +1040,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         /** How long a board kept in view may wait for the next one before the loading text replaces it. */
         const val LOADING_TEXT_DELAY_MILLIS = 300L
-
-        /** Draws of a free game with its rooms, and then again without rooms, before giving up. */
-        const val RANDOM_GAME_ATTEMPTS = 5
 
         /** Cells closer than this to the view centre (radians) are not worth turning the ball for. */
         const val FOCUS_MIN_ANGLE = 0.35f

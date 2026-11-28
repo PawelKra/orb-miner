@@ -129,7 +129,7 @@
     <string name="how_to_far_title">Pole dalekie</string>
     <string name="how_to_far">Złoty pierścień oznacza pole dalekie. Jego liczba liczy miny w zasięgu dwóch kroków, a nie tylko u sąsiadów. Ściana zasłania ten widok, a przeskok go przenosi. Stuknij odkryte pole dalekie, a kula podświetli jego zasięg. Gdy w ustawieniach włączysz „Flaga przez przytrzymanie”, a flagi i wybuchłe miny w zasięgu wyczerpują już liczbę, stuknięcie zamiast tego odkryje resztę zasięgu, jeśli coś w nim zostało do odkrycia.</string>
     <string name="how_to_line_title">Pole liniowe</string>
-    <string name="how_to_line">Turkusowa liczba ze strzałką liczy miny w prostym rzędzie pól w stronę strzałki, a nie u sąsiadów. Rząd kończy się na ścianie, wybrzeżu, pięciokącie albo po osiągnięciu limitu długości. Pole liniowe przy przejściu prowadzi rząd przez przejście w głąb następnego pokoju, więc pomaga do niego wejść.</string>
+    <string name="how_to_line">Turkusowa liczba ze strzałką liczy miny w prostym rzędzie pól w stronę strzałki, a nie u sąsiadów. Rząd kończy się na ścianie, wybrzeżu, pięciokącie albo po osiągnięciu limitu długości. Przygaszona kreska zamiast liczby znaczy, że w rzędzie nie ma min. Pole liniowe przy przejściu prowadzi rząd przez przejście w głąb następnego pokoju, więc pomaga do niego wejść.</string>
     <string name="how_to_portal_title">Przeskok</string>
     <string name="how_to_portal">Dwa odległe pola ze znacznikiem w tym samym kolorze są dla siebie sąsiadami. Liczba jednego liczy drugie, a zero rozlewa się przez parę. Pola przeskoku nigdy nie mają miny.</string>
     <string name="how_to_lock_title">Kłódka</string>
@@ -137,11 +137,13 @@
     <string name="how_to_island_title">Wyspa i ocean</string>
     <string name="how_to_island">Część kuli bywa oceanem, na którym nie ma pól. Ląd dzieli się wtedy na wyspy, a łączą je tylko przeskoki.</string>
 
-    <string name="feature_card_new">Nowość</string>
     <string name="feature_card_board">Na tej planszy</string>
     <string name="feature_card_counter">%1$d/%2$d</string>
     <string name="feature_card_counter_desc">Karta %1$d z %2$d</string>
     <string name="feature_card_next">Dalej</string>
     <string name="feature_card_ok">OK</string>
     <string name="action_feature_help">Objaśnij pola tej planszy</string>
+
+    <string name="setting_random_walls">Ściany i pokoje w wolnej grze</string>
+    <string name="setting_random_walls_desc">Wyłącz, aby losować plansze bez ścian i pokoi. Kampania się nie zmienia.</string>
 </resources>

@@ -41,6 +41,8 @@ object GameThemes {
                 pole = 0xFF5E6672,
                 portals = listOf(0xFFA77A99, 0xFF5F86B0, 0xFF6E9A78, 0xFF7C6AA8, 0xFFB9675F, 0xFF5E6672),
                 core = listOf(0xFF9AA6B4, 0xFF8693A2, 0xFF6B7787),
+                playerCells = listOf(0xFFDBF0FF, 0xFFFFEDDB),
+                ownedFlag = 0xFFA56F67,
             ),
             ui = pastelUi(
                 background = listOf(0xFFE9EDF1, 0xFFDEE4EA, 0xFFD2DAE2),
@@ -59,6 +61,7 @@ object GameThemes {
                 portals = 0xFF8E5F80,
                 locks = 0xFF7A6F48,
                 boardAccents = listOf(0xFF5B8A94, 0xFF4D6C90, 0xFF7A6A9E),
+                players = listOf(0xFF2D5C94, 0xFF934612),
                 onAccent = 0xFFFFFFFF,
                 branchText = BranchTextColors(
                     trunk = Color(0xFF415B79),
@@ -98,6 +101,8 @@ object GameThemes {
                 pole = 0xFF5D635C,
                 portals = listOf(0xFF7C8FB0, 0xFFA0708F, 0xFF7D6AA6, 0xFFB9675F, 0xFF5F8A6A, 0xFF5D635C),
                 core = listOf(0xFFA3AEA4, 0xFF8D998E, 0xFF717D72),
+                playerCells = listOf(0xFFE3F3FF, 0xFFFFF0E0),
+                ownedFlag = 0xFFB46B64,
             ),
             ui = pastelUi(
                 background = listOf(0xFFECEEEA, 0xFFE2E6E0, 0xFFD8DDD5),
@@ -116,6 +121,7 @@ object GameThemes {
                 portals = 0xFF5D7099,
                 locks = 0xFF7A7046,
                 boardAccents = listOf(0xFF6A8F84, 0xFF557560, 0xFF8E6A84),
+                players = listOf(0xFF2F5A8E, 0xFF934612),
                 onAccent = 0xFFFFFFFF,
                 branchText = BranchTextColors(
                     trunk = Color(0xFF46604F),
@@ -156,6 +162,8 @@ object GameThemes {
                 pole = 0xFF465066,
                 portals = listOf(0xFFA98455, 0xFFA0708F, 0xFF5E8C6E, 0xFF7C6AA8, 0xFFB9675F, 0xFF465066),
                 core = listOf(0xFF8494AD, 0xFF6B7C99, 0xFF515F78),
+                playerCells = listOf(0xFFDBF0FF, 0xFFFFEBD6),
+                ownedFlag = 0xFFB3685E,
             ),
             ui = pastelUi(
                 background = listOf(0xFFEEF1F5, 0xFFE5E9EF, 0xFFDCE2EA),
@@ -174,6 +182,7 @@ object GameThemes {
                 portals = 0xFF8A6A40,
                 locks = 0xFF6F6340,
                 boardAccents = listOf(0xFF4F7A90, 0xFF36508A, 0xFF6A5A96),
+                players = listOf(0xFF2A5592, 0xFF934612),
                 onAccent = 0xFFFCFCFD,
                 branchText = BranchTextColors(
                     trunk = Color(0xFF36508A),
@@ -241,6 +250,12 @@ object GameThemes {
                 decalsOverGloss = false,
                 win = 0xFFE3C47E to 0xFFA9CDA9,
                 lighting = DUSK_LIGHTING,
+                // Dark tints under the light digits, shaded like the revealed cells.
+                playerCells = listOf(0xFF23477E, 0xFF703A16),
+                playerCellMinShade = 0f,
+                // The dark flag of the light covered cells vanishes on the dark player cells.
+                ownedFlag = 0xFFF2C2BC,
+                ownedPole = 0xFFF5F3F8,
             ),
             ui = UiPalette(
                 backgroundTop = Color(0xFF3A3746),
@@ -259,6 +274,7 @@ object GameThemes {
                 lines = Color(0xFF8FD3C4),
                 portals = Color(0xFF9FC2B8),
                 locks = Color(0xFFCDBB8C),
+                players = listOf(Color(0xFF9EC2F2), Color(0xFFF2B486)),
                 boardAccents = listOf(Color(0xFFA9CBC9), Color(0xFFA9BFD8), Color(0xFFC3B5D8)),
                 textPrimary = Color(0xFFF5F3F8),
                 textSecondary = Color(0xFFD8D4DF),
@@ -336,6 +352,8 @@ private val DUSK_LIGHTING = pastelLighting(revealedFlat = 0.82f, revealedSheen =
  * faint white halo and gloss. The gloss lies under the digits, which keeps dark digits at their
  * contrast against the cell. Ocean waves are translucent white and the dark [coast] needs no casing;
  * the dot on covered cells takes half black, which keeps it at 3:1 or more against the lit fill.
+ * [playerCells] are pale tints shown at full colour at every light ([playerCellMinShade] 1); a light
+ * theme's tints are chosen so that every number, far and line colour keeps 4.5:1 on them.
  */
 private fun pastelSphere(
     covered: List<Long>,
@@ -356,6 +374,11 @@ private fun pastelSphere(
     pole: Long,
     portals: List<Long>,
     core: List<Long>,
+    playerCells: List<Long>,
+    playerCellMinShade: Float = 1f,
+    ownedFlag: Long = flag,
+    ownedPole: Long = pole,
+    unownedMine: Long = ink,
     borderAlpha: Float = 0.55f,
     coastCasing: Long = 0x00000000,
     wave: Long = 0xFFFFFFFF,
@@ -437,6 +460,11 @@ private fun pastelSphere(
     explosion = intArrayOf(
         argb(0xFFFFFFFF), argb(0xFFFFE6B0), argb(0xCCE89A6A), argb(0x66C4605A), argb(0x00C4605A),
     ),
+    playerCells = playerCells.map { Rgb.hex(it) },
+    playerCellMinShade = playerCellMinShade,
+    ownedFlag = argb(ownedFlag),
+    ownedPole = argb(ownedPole),
+    unownedMine = argb(unownedMine),
 )
 
 /**
@@ -444,7 +472,8 @@ private fun pastelSphere(
  * secondary and muted text colours; even the muted one keeps 4.5:1 on the bare gradient and on the
  * card panels. Each of them is at least 1.3 times the contrast of the next one, so the three levels
  * stay apart where they sit side by side. [branchText] holds darker shades of the branch colours for
- * text, at 4.5:1 or more on the gradient and on the tinted level nodes.
+ * text, at 4.5:1 or more on the gradient and on the tinted level nodes. [players] are darker shades of
+ * the players' cell tints, at 4.5:1 or more on the gradient and on the panels.
  * [primary], [secondary], [success] and [danger] stay dark enough that [onAccent] keeps 4.5:1 on a
  * filled button, whose gradient runs from one of them to [secondary] at 0.9 alpha over a white panel.
  */
@@ -465,6 +494,7 @@ private fun pastelUi(
     portals: Long,
     locks: Long,
     boardAccents: List<Long>,
+    players: List<Long>,
     onAccent: Long,
     branchText: BranchTextColors,
 ): UiPalette = UiPalette(
@@ -484,6 +514,7 @@ private fun pastelUi(
     lines = Color(lines),
     portals = Color(portals),
     locks = Color(locks),
+    players = players.map { Color(it) },
     boardAccents = boardAccents.map { Color(it) },
     textPrimary = Color(text[0]),
     textSecondary = Color(text[1]),
@@ -588,6 +619,16 @@ private fun spaceSphere(): SpherePalette = SpherePalette(
     decalsOverGloss = false,
     win = intArrayOf(argb(0x00FFD166), argb(0x00FFD166), argb(0xB0FFD166), argb(0x505CF2A8), argb(0x005CF2A8)),
     explosion = intArrayOf(argb(0xFFFFFFFF), argb(0xFFFFE08A), argb(0xCCFF7A2E), argb(0x66E0203A), argb(0x00E0203A)),
+    // Deep blue and deep orange: the bright digits keep 4.5:1 on them at full light wherever the gloss
+    // stays at or below its middle stop. Under its brightest spot, which lies over the digits too, they
+    // drop to about 3.1:1; the untinted revealed cells drop to about 2.2:1 there.
+    playerCells = listOf(Rgb.hex(0xFF0A3C8C), Rgb.hex(0xFF703808)),
+    playerCellMinShade = 0f,
+    // The neon flag keeps 4.3:1 or more on both player cells.
+    ownedFlag = argb(0xFFFF4A57),
+    ownedPole = argb(0xFFF2F4F8),
+    // The dark mine colour nearly vanishes on the dim lost-mine cells; a light grey keeps 3.9:1.
+    unownedMine = argb(0xFFC8CCD6),
 )
 
 /** Deep-space screen colours: dark translucent panels and bright neon accents. */
@@ -608,6 +649,7 @@ private fun spaceUi(): UiPalette = UiPalette(
     lines = Color(0xFF7DF9E1),
     portals = Color(0xFFFF5CD8),
     locks = Color(0xFFC6F25A),
+    players = listOf(Color(0xFF6FA8FF), Color(0xFFFFA65C)),
     boardAccents = listOf(Color(0xFF2EE6D6), Color(0xFF4F8BFF), Color(0xFFB07BFF)),
     textPrimary = Color(0xFFE9EDFF),
     textSecondary = Color(0xFFBCC3E0),

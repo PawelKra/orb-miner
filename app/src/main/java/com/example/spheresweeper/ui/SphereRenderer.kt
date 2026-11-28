@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import com.example.spheresweeper.logic.BoardLayout
 import com.example.spheresweeper.logic.GameStatus
+import com.example.spheresweeper.logic.LineCells
+import com.example.spheresweeper.logic.MatchEngine
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.MathUtils
@@ -35,7 +37,8 @@ import kotlin.random.Random
  * Digits turn with the view: each frame their baseline snaps to the cell edge that is most horizontal
  * on screen, so they stay as upright as the cell shape allows. Far cells show their number in gold
  * inside a gold ring. Line cells show their number in turquoise with an arrow fixed on the ball that
- * points at the edge their row starts through; once revealed, a faint line runs through the row.
+ * points at the edge their row starts through; once revealed, a faint line runs through the row. A
+ * revealed line cell whose row holds no mine shows only a turquoise dash: no arrow, no row line.
  * Walls are glowing lines along cell edges, drawn on top of the cells and the row lines.
  *
  * Ocean cells are water with a soft sheen, two short waves and no border; a heavy coastline runs along
@@ -128,6 +131,9 @@ class SphereRenderer(
     private var frameCx = 0f
     private var frameCy = 0f
     private var frameFocal = 1f
+
+    /** Territory match of the current frame, or null; see [fillOwned]. */
+    private var frameMatch: MatchEngine? = null
 
     /** Fill colour of each visible land cell in the current frame; the dot and the soft outline use it. */
     private val fillColor = IntArray(cellCount)
@@ -397,6 +403,9 @@ class SphereRenderer(
      * Draws the ball. [board] may be null (decorative ball: every cell covered).
      * [nowNanos] is compared with [effectStartNanos] (both System.nanoTime()) to animate effects.
      * [highlightCell] is a far cell whose scope (board.neighbors) is highlighted, -1 for none.
+     * [match] is the territory match played on [board], or null; the cells a player owns are filled in
+     * the player's colour ([SpherePalette.playerCells]). A solved board of a match is the end of the match,
+     * not a single-player win: it gets no win halo, and its mines nobody found show as unowned mines.
      */
     fun draw(
         scope: DrawScope,
@@ -410,7 +419,9 @@ class SphereRenderer(
         effectCell: Int = -1,
         layout: BoardLayout? = null,
         highlightCell: Int = -1,
+        match: MatchEngine? = null,
     ) {
+        frameMatch = match
         val width = scope.size.width
         val height = scope.size.height
         if (width <= 0f || height <= 0f) return
@@ -437,7 +448,8 @@ class SphereRenderer(
         frameCy = cy
         frameFocal = SphereCamera.focalLength(width, height, zoom, insets)
 
-        drawBackdrop(canvas, cx, cy, radius, won, effect, effectTime)
+        // The win halo belongs to a single-player win; a match ends with its board solved too.
+        drawBackdrop(canvas, cx, cy, radius, won && match == null, effect, effectTime)
 
         orientation.toRotationMatrix(matrix)
         val visible = transformAndCull()
@@ -788,7 +800,11 @@ class SphereRenderer(
             if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.mine)
         } else if (revealed) {
-            if (fill) {
+            val owner = frameMatch?.owner(cell) ?: MatchEngine.NO_OWNER
+            if (fill && owner >= 0) {
+                // An empty revealed cell gets its outline in drawEmptyCellOutlines.
+                fillOwned(canvas, cell, projR, owner, light, spec, border = !isEmptyRevealed(cell, board, layout))
+            } else if (fill) {
                 val shade = lighting.revealedFlat + lighting.revealedLit * light
                 val sheen = spec * lighting.revealedSheen
                 val lift = lighting.revealedLift
@@ -810,7 +826,11 @@ class SphereRenderer(
                 if (far) {
                     drawFarDecal(canvas, cell, n, decalAlpha)
                 } else if (line && layout != null) {
-                    drawLineDecal(canvas, cell, n, layout.lineSide(cell), decalAlpha)
+                    if (LineCells.showsEmptyRow(layout, board, cell)) {
+                        drawEmptyLineDecal(canvas, cell, decalAlpha)
+                    } else {
+                        drawLineDecal(canvas, cell, n, layout.lineSide(cell), decalAlpha)
+                    }
                 } else if (n in 1..CellDecals.MAX_NUMBER) {
                     drawDigitDecal(canvas, cell, n, decalAlpha)
                 }
@@ -825,10 +845,24 @@ class SphereRenderer(
             val c = palette.wrongFlagCell
             if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
             if (drawDecals) drawFlagDecal(canvas, cell, decalAlpha, palette.wrongPole, palette.wrongFlag)
+        } else if (frameMatch != null && won && mine && !flagged) {
+            // The end of a territory match: a mine nobody found belongs to nobody and shows as a plain mine.
+            val c = palette.lostMineCell
+            if (fill) fillLit(canvas, cell, projR, c.r, c.g, c.b, light, spec, 0.25f)
+            if (drawDecals) drawMineDecal(canvas, cell, decalAlpha, palette.unownedMine)
         } else {
-            if (fill) fillCovered(canvas, cell, projR, light, spec, rim)
+            // In a territory match a covered cell has an owner only when it is a found mine.
+            val owner = frameMatch?.owner(cell) ?: MatchEngine.NO_OWNER
+            if (fill && owner >= 0) {
+                fillOwned(canvas, cell, projR, owner, light, spec, border = true)
+            } else if (fill) {
+                fillCovered(canvas, cell, projR, light, spec, rim)
+            }
             if (drawDecals) {
-                if (flagged || (won && mine)) {
+                if (owner >= 0 && flagged) {
+                    // A found mine of a match, on its owner's cell: a flag that stands out on the player colours.
+                    drawFlagDecal(canvas, cell, decalAlpha, palette.ownedPole, palette.ownedFlag)
+                } else if (flagged || (won && mine)) {
                     drawFlagDecal(canvas, cell, decalAlpha, palette.pole, palette.flag)
                 } else if (!board.isLockOpen(cell)) {
                     drawLockDecal(canvas, cell, board, 1f, decalAlpha)
@@ -906,6 +940,26 @@ class SphereRenderer(
         val shade = lighting.coveredFlat + lighting.coveredLit * light
         val sheen = spec * gloss
         fillCell(canvas, cell, projR, r * shade + sheen, g * shade + sheen, b * shade + sheen, border = true)
+    }
+
+    /**
+     * Cell of player [owner] in a territory match: the player's colour shaded like a revealed cell under
+     * [light], with the shade at least [SpherePalette.playerCellMinShade], plus the revealed sheen.
+     */
+    private fun fillOwned(
+        canvas: Canvas, cell: Int, projR: Float, owner: Int, light: Float, spec: Float, border: Boolean,
+    ) {
+        val l = lighting
+        val shade = max(palette.playerCellMinShade, l.revealedFlat + l.revealedLit * light)
+        val sheen = spec * l.revealedSheen
+        val c = palette.playerCells[owner]
+        fillCell(
+            canvas, cell, projR,
+            c.r * shade + l.revealedLift.r + sheen,
+            c.g * shade + l.revealedLift.g + sheen,
+            c.b * shade + l.revealedLift.b + sheen,
+            border,
+        )
     }
 
     /**
@@ -1091,7 +1145,7 @@ class SphereRenderer(
 
     /**
      * Line cell: number upright like a digit, and an arrow fixed on the ball at the edge [side] the
-     * counted row starts through. A zero shows the arrow alone.
+     * counted row starts through. A hidden number (closed lock) shows the arrow alone.
      */
     private fun drawLineDecal(canvas: Canvas, cell: Int, n: Int, side: Int, alpha: Float) {
         if (alpha < MIN_DECAL_ALPHA) return
@@ -1100,6 +1154,15 @@ class SphereRenderer(
         }
         if (!setupEdgeDecal(cell, side)) return
         onDecal(canvas) { decals.drawLineArrow(canvas, alpha) }
+    }
+
+    /**
+     * Line cell whose row holds no mine ([LineCells.showsEmptyRow]): a short dash in the line colour, upright
+     * like a digit, without the arrow.
+     */
+    private fun drawEmptyLineDecal(canvas: Canvas, cell: Int, alpha: Float) {
+        if (alpha < MIN_DECAL_ALPHA || !setupAlignedDecal(cell)) return
+        onDecal(canvas) { decals.drawEmptyLine(canvas, alpha) }
     }
 
     /**
@@ -1153,11 +1216,13 @@ class SphereRenderer(
 
     /**
      * For every revealed line cell, a thin translucent line from its arrow edge through the centres of
-     * the cells its number counts. Segments fade towards the horizon like the walls.
+     * the cells its number counts. Segments fade towards the horizon like the walls. A line whose row
+     * shows no mine ([LineCells.showsEmptyRow]) gets no row line.
      */
     private fun drawLineRows(canvas: Canvas, layout: BoardLayout, board: MinesweeperBoard) {
         for (cell in 0 until cellCount) {
             if (!layout.isLine(cell) || !board.isRevealed(cell)) continue
+            if (LineCells.showsEmptyRow(layout, board, cell)) continue
             val row = layout.linePath(cell)
             if (row.isEmpty()) continue
             val o = cell * 3

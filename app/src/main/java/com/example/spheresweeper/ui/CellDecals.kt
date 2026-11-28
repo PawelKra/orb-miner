@@ -16,7 +16,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Paints the marks that sit on a cell: digits, the far ring, the line number and arrow, the portal
+ * Paints the marks that sit on a cell: digits, the far ring, the line number and arrow (or the dash of
+ * a line whose row holds no mine), the portal
  * mark, closed and open padlocks, flags, mines, the dot of a plain covered cell and the waves of an
  * ocean cell. The ball renderer and flat previews (such as a
  * legend of cell types) share it, so both show exactly the same drawings.
@@ -225,6 +226,20 @@ class CellDecals(
         canvas.drawPath(arrowPath, outlinePaint)
         iconPaint.color = MathUtils.withAlpha(palette.line, alpha)
         canvas.drawPath(arrowPath, iconPaint)
+    }
+
+    /**
+     * Line cell whose row holds no mine: a short horizontal dash in the line colour, dimmed, centred on
+     * the cell. It says "this line counts nothing" without a digit that could read as a neighbour count,
+     * and without the arrow, so no row is pointed at.
+     */
+    fun drawEmptyLine(canvas: Canvas, alpha: Float) {
+        iconStroke.color = decalOutline(alpha)
+        iconStroke.strokeWidth = EMPTY_LINE_STROKE + EMPTY_LINE_OUTLINE
+        canvas.drawLine(-EMPTY_LINE_HALF_LENGTH, 0f, EMPTY_LINE_HALF_LENGTH, 0f, iconStroke)
+        iconStroke.color = MathUtils.withAlpha(palette.line, alpha * EMPTY_LINE_ALPHA)
+        iconStroke.strokeWidth = EMPTY_LINE_STROKE
+        canvas.drawLine(-EMPTY_LINE_HALF_LENGTH, 0f, EMPTY_LINE_HALF_LENGTH, 0f, iconStroke)
     }
 
     /**
@@ -453,6 +468,12 @@ class CellDecals(
         private const val LINE_ARROW_BASE = 60f
         private const val LINE_ARROW_HALF_WIDTH = 30f
         private const val LINE_ARROW_OUTLINE = 9f
+
+        // Dash of a line cell whose row holds no mine (decal units), round caps, about a digit's width.
+        private const val EMPTY_LINE_HALF_LENGTH = 26f
+        private const val EMPTY_LINE_STROKE = 12f
+        private const val EMPTY_LINE_OUTLINE = 9f
+        private const val EMPTY_LINE_ALPHA = 0.75f
 
         // Padlock of a closed lock in decal units: body below, shackle above, the count inside the body.
         // It stays within the ring of a far cell; on line cells it shrinks to clear the arrow.

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -44,9 +45,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -66,6 +69,7 @@ import com.example.spheresweeper.R
 import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
+import com.example.spheresweeper.logic.MatchEngine
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import com.example.spheresweeper.ui.theme.GameTheme
@@ -116,8 +120,12 @@ fun MenuScreen(vm: GameViewModel) {
                     CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
                     Spacer(Modifier.height(10.dp))
                     HowToCard(onClick = { vm.openHowTo() })
+                    Spacer(Modifier.height(10.dp))
+                    StatsCard(onClick = { vm.openStats() })
                     Spacer(Modifier.height(20.dp))
                     BoardList(vm)
+                    Spacer(Modifier.height(20.dp))
+                    MatchSection(vm)
                 }
             }
         } else {
@@ -140,8 +148,12 @@ fun MenuScreen(vm: GameViewModel) {
                     CampaignCard(progress = vm.progress, onClick = { vm.openCampaign() })
                     Spacer(Modifier.height(10.dp))
                     HowToCard(onClick = { vm.openHowTo() })
+                    Spacer(Modifier.height(10.dp))
+                    StatsCard(onClick = { vm.openStats() })
                     Spacer(Modifier.height(20.dp))
                     BoardList(vm)
+                    Spacer(Modifier.height(24.dp))
+                    MatchSection(vm)
                     Spacer(Modifier.height(24.dp))
                     SettingsSection(vm)
                     Spacer(Modifier.height(12.dp))
@@ -225,12 +237,179 @@ private fun ColumnScope.BoardList(vm: GameViewModel) {
             best = vm.bestTimes[boardSize],
             onClick = { vm.startGame(boardSize) },
         )
-        if (index < sizes.size - 1) Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(10.dp))
+    }
+    SettingRow(
+        title = stringResource(R.string.setting_random_walls),
+        description = stringResource(R.string.setting_random_walls_desc),
+        checked = vm.randomWalls,
+        onCheckedChange = { vm.updateRandomWalls(it) },
+    )
+}
+
+/**
+ * Territory match for two players on one phone: a card with the rules in short, the board size and
+ * the moves per turn as two radio groups, and a button that starts the match. The choices live in the
+ * view model; the walls follow the free-play switch above.
+ */
+@Composable
+private fun ColumnScope.MatchSection(vm: GameViewModel) {
+    SectionTitle(stringResource(R.string.match_section))
+    val shape = RoundedCornerShape(18.dp)
+    val colors = themeColors
+    val first = colors.players[0]
+    val second = colors.players[1]
+    val resources = LocalContext.current.resources
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.panel.copy(alpha = CARD_PANEL_ALPHA))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(first.copy(alpha = 0.12f), first.copy(alpha = 0f), second.copy(alpha = 0.12f)),
+                ),
+            )
+            .border(1.dp, colors.panelBorder.copy(alpha = 0.7f), shape)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.size(38.dp)) { drawPlayersBadge(first, second) }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.match_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.textPrimary,
+                )
+                Text(
+                    text = stringResource(R.string.match_card_subtitle),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.match_rules),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(12.dp))
+        ChoiceLabel(stringResource(R.string.match_size))
+        val sizes = BoardSize.values().toList()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (row in sizes.chunked(MATCH_SIZE_COLUMNS)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (boardSize in row) {
+                        ChoiceChip(
+                            text = stringResource(boardNameRes(boardSize)),
+                            selected = boardSize == vm.matchSize,
+                            onClick = { vm.updateMatchSize(boardSize) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    for (k in row.size until MATCH_SIZE_COLUMNS) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        ChoiceLabel(stringResource(R.string.match_moves_per_turn))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (moves in MatchEngine.MIN_MOVES_PER_TURN..MatchEngine.MAX_MOVES_PER_TURN) {
+                ChoiceChip(
+                    text = moves.toString(),
+                    selected = moves == vm.matchMovesPerTurn,
+                    onClick = { vm.updateMatchMovesPerTurn(moves) },
+                    modifier = Modifier.weight(1f),
+                    description = resources.getQuantityString(R.plurals.match_moves_desc, moves, moves),
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        GlowTextButton(
+            text = stringResource(R.string.match_start),
+            onClick = { vm.startMatch() },
+            modifier = Modifier.fillMaxWidth(),
+            primary = true,
+            accent = colors.primary,
+        )
     }
 }
 
-/** Badge colour of board [index] of [count]: runs through the theme's board accents. */
-private fun boardAccent(index: Int, count: Int, colors: UiPalette): Color {
+/** Board sizes per row in the match card; two keep the longest size name on one line on a 360 dp screen. */
+private const val MATCH_SIZE_COLUMNS = 2
+
+/** Title of a group of choices in the match card. */
+@Composable
+private fun ChoiceLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = themeColors.textSecondary,
+        modifier = Modifier.padding(start = 2.dp, bottom = 6.dp),
+    )
+}
+
+/**
+ * One option of a radio group in the match card: [text] in a rounded box, outlined in the accent colour
+ * with a light accent tint when [selected]. [description] replaces [text] for accessibility services.
+ */
+@Composable
+private fun ChoiceChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+) {
+    val colors = themeColors
+    val shape = RoundedCornerShape(12.dp)
+    val accent = colors.primary
+    Box(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(if (selected) accent.copy(alpha = 0.16f) else Color.Transparent)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) accent else colors.panelBorder,
+                shape = shape,
+            )
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** Two overlapping hexagons in the players' colours: "two players". */
+private fun DrawScope.drawPlayersBadge(first: Color, second: Color) {
+    val w = size.minDimension
+    val radius = w * 0.3f
+    drawPlayerHex(first, filled = true, center = Offset(w * 0.32f, w * 0.38f), radius = radius)
+    drawPlayerHex(second, filled = true, center = Offset(w * 0.68f, w * 0.62f), radius = radius)
+}
+
+/** Badge colour of board [index] of [count]: runs through the theme's board accents; the statistics use it too. */
+internal fun boardAccent(index: Int, count: Int, colors: UiPalette): Color {
     val stops = colors.boardAccents
     if (stops.size == 1) return stops[0]
     val t = if (count <= 1) 0f else index.toFloat() / (count - 1)
@@ -239,7 +418,8 @@ private fun boardAccent(index: Int, count: Int, colors: UiPalette): Color {
     return lerp(stops[k], stops[k + 1], scaled - k)
 }
 
-private fun boardNameRes(size: BoardSize): Int = when (size) {
+/** Display name of [size] on the board cards and in the statistics. */
+internal fun boardNameRes(size: BoardSize): Int = when (size) {
     BoardSize.TINY -> R.string.board_tiny
     BoardSize.SMALL -> R.string.board_small
     BoardSize.MEDIUM -> R.string.board_medium
@@ -382,6 +562,44 @@ private fun CampaignCard(progress: CampaignProgress, onClick: () -> Unit) {
 /** Entry to the "How to play" screen: the rules and a legend of the cell marks. */
 @Composable
 private fun HowToCard(onClick: () -> Unit) {
+    EntryCard(
+        title = stringResource(R.string.how_to_title),
+        subtitle = stringResource(R.string.how_to_card_subtitle),
+        onClick = onClick,
+    ) { accent ->
+        Text(
+            text = "?",
+            style = numberTextStyle(18f, accent),
+            // The mark is decoration; the title next to it names the button.
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+    }
+}
+
+/** Entry to the statistics of finished games. */
+@Composable
+private fun StatsCard(onClick: () -> Unit) {
+    EntryCard(
+        title = stringResource(R.string.stats_title),
+        subtitle = stringResource(R.string.stats_card_subtitle),
+        onClick = onClick,
+    ) { accent ->
+        // Decoration like the "How to play" mark: a Canvas has no semantics, so the title names the button.
+        Canvas(Modifier.size(18.dp)) { drawBarsIcon(accent) }
+    }
+}
+
+/**
+ * Menu card that opens another screen: a hexagon outline in the theme's primary colour with [badge]
+ * inside it, then [title] and [subtitle]. [badge] gets the accent colour.
+ */
+@Composable
+private fun EntryCard(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    badge: @Composable (accent: Color) -> Unit,
+) {
     val shape = RoundedCornerShape(18.dp)
     val colors = themeColors
     val accent = colors.primary
@@ -406,22 +624,17 @@ private fun HowToCard(onClick: () -> Unit) {
                     .fillMaxSize()
                     .hexOutline(accent),
             )
-            Text(
-                text = "?",
-                style = numberTextStyle(18f, accent),
-                // The mark is decoration; the title next to it names the button.
-                modifier = Modifier.clearAndSetSemantics { },
-            )
+            badge(accent)
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = stringResource(R.string.how_to_title),
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = colors.textPrimary,
             )
             Text(
-                text = stringResource(R.string.how_to_card_subtitle),
+                text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
@@ -429,10 +642,26 @@ private fun HowToCard(onClick: () -> Unit) {
     }
 }
 
+/** Three rising bars on a common base line: "statistics". */
+private fun DrawScope.drawBarsIcon(color: Color) {
+    val w = size.minDimension
+    val bar = w * 0.22f
+    val gap = (w - 3f * bar) / 2f
+    val heights = floatArrayOf(0.45f, 0.7f, 1f)
+    for (k in heights.indices) {
+        val h = w * heights[k]
+        drawRect(
+            color = color,
+            topLeft = Offset(k * (bar + gap), w - h),
+            size = Size(bar, h),
+        )
+    }
+}
+
 /**
- * Hexagon outline, the badge of the "How to play" card. It has no fill: on a tint of the accent the
- * question mark in the accent colour would drop below 4.5:1. The path and the stroke are built when the
- * size or [accent] changes, not on every draw.
+ * Hexagon outline, the badge of the menu's entry cards ([EntryCard]). It has no fill: on a tint of the
+ * accent the question mark in the accent colour would drop below 4.5:1. The path and the stroke are
+ * built when the size or [accent] changes, not on every draw.
  */
 private fun Modifier.hexOutline(accent: Color): Modifier = drawWithCache {
     val cx = size.width / 2f

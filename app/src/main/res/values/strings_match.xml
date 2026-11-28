@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="match_section">Dla dwóch graczy</string>
+    <string name="match_title">Gra o teren</string>
+    <string name="match_card_subtitle">Dwóch graczy na jednym telefonie, na zmianę. Więcej pól wygrywa.</string>
+    <string name="match_rules">Odkryte pola i trafnie wskazane miny są Twoje. Pole wskazane błędnie jako mina i mina, która wybuchnie, idą do rywala. Obszar startowy jest niczyj. Gra kończy się z ostatnim bezpiecznym polem. Ściany jak w wolnej grze.</string>
+    <string name="match_size">Plansza</string>
+    <string name="match_moves_per_turn">Ruchy na turę</string>
+    <plurals name="match_moves_desc">
+        <item quantity="one">%d ruch na turę</item>
+        <item quantity="few">%d ruchy na turę</item>
+        <item quantity="many">%d ruchów na turę</item>
+        <item quantity="other">%d ruchu na turę</item>
+    </plurals>
+    <string name="match_start">Zagraj</string>
+
+    <string name="match_player">Gracz %1$d</string>
+    <string name="match_score_desc">Gracz %1$d, pola: %2$d</string>
+    <string name="match_score_turn_desc">Gracz %1$d, pola: %2$d, teraz jego tura</string>
+    <string name="match_turn">Tura: gracz %1$d</string>
+    <string name="match_turn_moves">Tura: gracz %1$d · pozostałe ruchy: %2$d z %3$d</string>
+    <string name="match_hint_double_tap">Stuknij: odkryj · dwa razy: wskaż minę</string>
+    <string name="match_hint_long_press">Stuknij: odkryj · przytrzymaj: wskaż minę</string>
+
+    <string name="match_handoff_title">Przekaż telefon</string>
+    <string name="match_handoff_tap">Stuknij, aby zacząć turę</string>
+
+    <string name="match_result_winner">Wygrywa gracz %1$d!</string>
+    <string name="match_result_draw">Remis!</string>
+    <string name="match_result_subtitle">Tyle pól zajął każdy z graczy</string>
+    <string name="match_result_unowned_mines">Miny, których nikt nie znalazł: %1$d. Nie należą do nikogo.</string>
+
+    <string name="match_leave_title">Przerwać grę?</string>
+    <string name="match_leave_text">Wynik tej gry przepadnie.</string>
+    <string name="match_leave_confirm">Wyjdź</string>
+    <string name="match_restart_title">Zacząć od nowa?</string>
+    <string name="match_restart_text">Ta gra o teren przepadnie, a gracze zaczną na nowej planszy.</string>
+    <string name="match_restart_confirm">Od nowa</string>
+    <string name="match_keep_playing">Grajcie dalej</string>
+
+    <string name="how_to_match_title">Dwóch graczy</string>
+    <string name="how_to_match">W grze o teren dwie osoby grają na zmianę na jednym telefonie. Odkryte pola i trafnie wskazane miny są Twoje. Pole błędnie wskazane jako mina i mina, która wybuchnie, idą do rywala. Gra kończy się z ostatnim bezpiecznym polem, a miny, których nikt nie znalazł, nie należą do nikogo. Wygrywa ten, kto zajmie więcej pól.</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stats_title">Statystyki</string>
+    <string name="stats_card_subtitle">Wygrane, czasy i serie w wolnej grze i kampanii</string>
+    <string name="stats_empty_title">Brak statystyk</string>
+    <string name="stats_empty">Skończ pierwszą grę, wygraną albo przegraną. Statystyki pojawią się tutaj. Przerwana gra się nie liczy.</string>
+    <string name="stats_section_empty">Brak ukończonych gier</string>
+    <string name="stats_games_wins">gry: %1$d · wygrane: %2$d</string>
+    <string name="stats_win_rate">%1$d%%</string>
+    <string name="stats_win_rate_desc">Skuteczność: %1$d%%</string>
+    <string name="stats_average">Średni czas wygranej</string>
+    <string name="stats_streak">Obecna seria</string>
+    <string name="stats_best_streak">Najdłuższa seria</string>
+    <string name="stats_no_value">–</string>
+</resources>

@@ -55,9 +55,10 @@ import kotlin.math.sqrt
 import android.graphics.Canvas as NativeCanvas
 
 /**
- * "How to play": the goal of the game, then a legend of the cell types. Each legend entry shows a
- * small flat patch of cells drawn in the current theme's ball colours, with the same marks the ball
- * shows ([CellDecals]), next to a title and a short explanation. Back returns to the menu.
+ * "How to play": the goal of the game, then a legend of the cell types and the rules of the two-player
+ * match. Each legend entry shows a small flat patch of cells drawn in the current theme's ball colours,
+ * with the same marks the ball shows ([CellDecals]), next to a title and a short explanation. Back
+ * returns to the menu.
  */
 @Composable
 fun HowToPlayScreen(vm: GameViewModel) {
@@ -86,11 +87,13 @@ fun HowToPlayScreen(vm: GameViewModel) {
                         .widthIn(max = 560.dp)
                         .fillMaxWidth(),
                 ) {
-                    GoalPanel()
+                    TextPanel(R.string.how_to_goal_title, R.string.how_to_goal)
                     for (entry in LEGEND) {
                         Spacer(Modifier.height(10.dp))
                         LegendItem(entry, painter)
                     }
+                    Spacer(Modifier.height(10.dp))
+                    TextPanel(R.string.how_to_match_title, R.string.how_to_match)
                     Spacer(Modifier.height(16.dp))
                 }
             }
@@ -159,9 +162,12 @@ private fun HowToTopBar(onBack: () -> Unit) {
     }
 }
 
-/** The goal of the game and the no-guessing promise, above the legend. */
+/**
+ * Panel with a heading and a text and no drawing: the goal of the game and the no-guessing promise
+ * above the legend, and the rules of the two-player match below it.
+ */
 @Composable
-private fun GoalPanel() {
+private fun TextPanel(@StringRes titleRes: Int, @StringRes textRes: Int) {
     val shape = RoundedCornerShape(18.dp)
     val colors = themeColors
     Column(
@@ -173,14 +179,14 @@ private fun GoalPanel() {
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Text(
-            text = stringResource(R.string.how_to_goal_title),
+            text = stringResource(titleRes),
             style = MaterialTheme.typography.titleMedium,
             color = colors.textPrimary,
             modifier = Modifier.semantics { heading() },
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.how_to_goal),
+            text = stringResource(textRes),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textSecondary,
         )
