@@ -24,6 +24,8 @@ import com.example.spheresweeper.logic.NoGuessGenerator
 import com.example.spheresweeper.logic.RecordResult
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
+import com.example.spheresweeper.ui.theme.GameTheme
+import com.example.spheresweeper.ui.theme.GameThemes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -163,6 +165,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var hapticsEnabled by mutableStateOf(prefs.hapticsEnabled)
         private set
 
+    /** Look of the game; an unknown stored identifier falls back to the default theme. */
+    var theme by mutableStateOf(GameThemes.byId(prefs.themeId))
+        private set
+
     val bestTimes: SnapshotStateMap<BoardSize, Long> = mutableStateMapOf<BoardSize, Long>().also {
         it.putAll(prefs.loadBestTimes())
     }
@@ -289,6 +295,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun updateHapticsEnabled(enabled: Boolean) {
         hapticsEnabled = enabled
         prefs.hapticsEnabled = enabled
+    }
+
+    fun updateTheme(value: GameTheme) {
+        theme = value
+        prefs.themeId = value.id
     }
 
     // ---------------------------------------------------------------- view

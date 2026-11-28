@@ -2,10 +2,39 @@
 <resources>
 
     <style name="Theme.SphereSweeper" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/space_background</item>
-        <item name="android:colorBackground">@color/space_background</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorBackground">@color/window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!--
+        Starting-window themes, one per game theme. From Android 13 MainActivity sets the one of the
+        stored theme as the splash screen theme of the next launch.
+    -->
+    <style name="Theme.SphereSweeper.Akwarela">
+        <item name="android:windowBackground">@color/window_akwarela</item>
+        <item name="android:colorBackground">@color/window_akwarela</item>
+    </style>
+
+    <style name="Theme.SphereSweeper.Szalwia">
+        <item name="android:windowBackground">@color/window_szalwia</item>
+        <item name="android:colorBackground">@color/window_szalwia</item>
+    </style>
+
+    <style name="Theme.SphereSweeper.Porcelana">
+        <item name="android:windowBackground">@color/window_porcelana</item>
+        <item name="android:colorBackground">@color/window_porcelana</item>
+    </style>
+
+    <style name="Theme.SphereSweeper.Zmierzch">
+        <item name="android:windowBackground">@color/window_zmierzch</item>
+        <item name="android:colorBackground">@color/window_zmierzch</item>
+    </style>
+
+    <style name="Theme.SphereSweeper.Kosmos">
+        <item name="android:windowBackground">@color/window_kosmos</item>
+        <item name="android:colorBackground">@color/window_kosmos</item>
     </style>
 
 </resources>

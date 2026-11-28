@@ -33,12 +33,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.spheresweeper.ui.theme.SpaceColors
+import com.example.spheresweeper.ui.theme.numberTextStyle
+import com.example.spheresweeper.ui.theme.themeColors
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -46,8 +44,8 @@ import kotlin.math.sin
 private val ButtonShape = RoundedCornerShape(16.dp)
 private val PillShape = RoundedCornerShape(50)
 
-/** Soft glow drawn just outside the bounds, behind a rounded control. */
-private fun Modifier.outerGlow(color: Color, corner: Dp, spread: Dp): Modifier = drawBehind {
+/** Soft glow drawn just outside the bounds, behind a rounded control; [strength] scales its alpha. */
+private fun Modifier.outerGlow(color: Color, corner: Dp, spread: Dp, strength: Float): Modifier = drawBehind {
     val s = spread.toPx()
     val c = corner.toPx()
     for (step in 1..3) {
@@ -57,7 +55,7 @@ private fun Modifier.outerGlow(color: Color, corner: Dp, spread: Dp): Modifier =
             topLeft = Offset(-grow, -grow),
             size = Size(size.width + grow * 2f, size.height + grow * 2f),
             cornerRadius = CornerRadius(c + grow, c + grow),
-            alpha = 0.10f / step,
+            alpha = 0.10f * strength / step,
         )
     }
 }
@@ -68,17 +66,18 @@ fun GlowIconButton(
     onClick: () -> Unit,
     contentDescription: String,
     modifier: Modifier = Modifier,
-    accent: Color = SpaceColors.Cyan,
+    accent: Color = themeColors.primary,
     icon: DrawScope.(Color) -> Unit,
 ) {
+    val colors = themeColors
     Box(
         modifier = modifier
             .size(48.dp)
-            .outerGlow(accent, 16.dp, 6.dp)
+            .outerGlow(accent, 16.dp, 6.dp, colors.glow)
             .clip(ButtonShape)
             .background(
                 Brush.verticalGradient(
-                    listOf(SpaceColors.PanelTop.copy(alpha = 0.85f), SpaceColors.Panel.copy(alpha = 0.7f)),
+                    listOf(colors.panelTop.copy(alpha = 0.85f), colors.panel.copy(alpha = 0.7f)),
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.6f), ButtonShape)
@@ -97,17 +96,18 @@ fun GlowTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     primary: Boolean = true,
-    accent: Color = SpaceColors.Cyan,
+    accent: Color = themeColors.primary,
 ) {
+    val colors = themeColors
     val background = if (primary) {
-        Brush.horizontalGradient(listOf(accent.copy(alpha = 0.9f), SpaceColors.Violet.copy(alpha = 0.9f)))
+        Brush.horizontalGradient(listOf(accent.copy(alpha = 0.9f), colors.secondary.copy(alpha = 0.9f)))
     } else {
-        Brush.verticalGradient(listOf(SpaceColors.PanelTop.copy(alpha = 0.85f), SpaceColors.Panel.copy(alpha = 0.7f)))
+        Brush.verticalGradient(listOf(colors.panelTop.copy(alpha = 0.85f), colors.panel.copy(alpha = 0.7f)))
     }
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .outerGlow(accent, 16.dp, if (primary) 8.dp else 4.dp)
+            .outerGlow(accent, 16.dp, if (primary) 8.dp else 4.dp, colors.glow)
             .clip(ButtonShape)
             .background(background)
             .border(1.dp, accent.copy(alpha = if (primary) 0.9f else 0.5f), ButtonShape)
@@ -118,7 +118,7 @@ fun GlowTextButton(
         Text(
             text = text,
             style = MaterialTheme.typography.labelLarge,
-            color = if (primary) Color(0xFF071022) else SpaceColors.TextPrimary,
+            color = if (primary) colors.onAccent else colors.textPrimary,
         )
     }
 }
@@ -137,6 +137,7 @@ fun StatPill(
     enabled: Boolean = true,
     icon: DrawScope.(Color) -> Unit,
 ) {
+    val colors = themeColors
     val clickable = if (onClick != null) {
         Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
     } else {
@@ -151,7 +152,7 @@ fun StatPill(
         modifier = modifier
             .alpha(if (enabled) 1f else 0.5f)
             .clip(PillShape)
-            .background(SpaceColors.Panel.copy(alpha = 0.72f))
+            .background(colors.panel.copy(alpha = 0.72f))
             .border(1.dp, accent.copy(alpha = borderAlpha), PillShape)
             .then(clickable)
             .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -162,12 +163,7 @@ fun StatPill(
         Spacer(Modifier.width(8.dp))
         Text(
             text = value,
-            style = TextStyle(
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                fontFeatureSettings = "tnum",
-                color = SpaceColors.TextPrimary,
-            ),
+            style = numberTextStyle(18f, colors.textPrimary),
         )
     }
 }
@@ -287,26 +283,6 @@ fun DrawScope.drawBulbIcon(color: Color) {
         strokeWidth = w * 0.09f,
         cap = StrokeCap.Round,
     )
-}
-
-/** Small red flag on a pole. */
-fun DrawScope.drawFlagIcon(color: Color) {
-    val w = size.minDimension
-    val poleX = w * 0.3f
-    drawLine(
-        color = SpaceColors.TextPrimary,
-        start = Offset(poleX, w * 0.92f),
-        end = Offset(poleX, w * 0.08f),
-        strokeWidth = w * 0.1f,
-        cap = StrokeCap.Round,
-    )
-    val cloth = Path().apply {
-        moveTo(poleX, w * 0.08f)
-        lineTo(w * 0.9f, w * 0.3f)
-        lineTo(poleX, w * 0.52f)
-        close()
-    }
-    drawPath(cloth, color)
 }
 
 /** Five-pointed star: "campaign star". With [filled] false only the outline is drawn. */

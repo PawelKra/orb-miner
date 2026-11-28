@@ -16,7 +16,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
-import com.example.spheresweeper.ui.theme.SpaceColors
+import com.example.spheresweeper.ui.theme.Backdrop
+import com.example.spheresweeper.ui.theme.LocalGameTheme
+import com.example.spheresweeper.ui.theme.UiPalette
+import com.example.spheresweeper.ui.theme.themeColors
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -73,12 +76,36 @@ private class StarField(seed: Int, val count: Int) {
     }
 }
 
+/** Full-screen backdrop of the current theme: a plain gradient or the starfield. */
+@Composable
+fun ThemeBackground(modifier: Modifier = Modifier) {
+    when (LocalGameTheme.current.backdrop) {
+        Backdrop.STARS -> SpaceBackground(themeColors, modifier)
+        Backdrop.GRADIENT -> GradientBackground(themeColors, modifier)
+    }
+}
+
+/** Vertical gradient through the theme's three background colours. */
+@Composable
+private fun GradientBackground(colors: UiPalette, modifier: Modifier = Modifier) {
+    Spacer(
+        modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val gradient = Brush.verticalGradient(
+                    colors = listOf(colors.backgroundTop, colors.backgroundMid, colors.backgroundBottom),
+                )
+                onDrawBehind { drawRect(gradient) }
+            },
+    )
+}
+
 /**
  * Deep-space backdrop: vertical gradient, two faint nebulae and a slowly twinkling starfield.
  * Twinkling is throttled to about 30 updates per second and drawn in its own layer.
  */
 @Composable
-fun SpaceBackground(modifier: Modifier = Modifier) {
+private fun SpaceBackground(colors: UiPalette, modifier: Modifier = Modifier) {
     val stars = remember { StarField(seed = 1337, count = 170) }
     var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
@@ -99,15 +126,15 @@ fun SpaceBackground(modifier: Modifier = Modifier) {
             .graphicsLayer { }
             .drawWithCache {
                 val gradient = Brush.verticalGradient(
-                    colors = listOf(SpaceColors.SpaceTop, SpaceColors.SpaceMid, SpaceColors.SpaceBottom),
+                    colors = listOf(colors.backgroundTop, colors.backgroundMid, colors.backgroundBottom),
                 )
                 val nebulaA = Brush.radialGradient(
-                    colors = listOf(SpaceColors.NebulaViolet.copy(alpha = 0.22f), Color.Transparent),
+                    colors = listOf(colors.nebulaPrimary.copy(alpha = 0.22f), Color.Transparent),
                     center = Offset(size.width * 0.18f, size.height * 0.22f),
                     radius = size.maxDimension * 0.55f,
                 )
                 val nebulaB = Brush.radialGradient(
-                    colors = listOf(SpaceColors.NebulaTeal.copy(alpha = 0.14f), Color.Transparent),
+                    colors = listOf(colors.nebulaSecondary.copy(alpha = 0.14f), Color.Transparent),
                     center = Offset(size.width * 0.85f, size.height * 0.8f),
                     radius = size.maxDimension * 0.5f,
                 )

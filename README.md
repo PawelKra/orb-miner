@@ -87,6 +87,45 @@ Gra zapamiętuje najlepszy wynik każdego poziomu, a słabsza powtórka go nie o
 Mapa pokazuje gwiazdki pod każdym poziomem. Pulsująca poświata wskazuje w każdej gałęzi następny poziom do zagrania.
 Parametry poziomów zmienisz w tabeli `Campaign.TUNING` w pliku `app/src/main/java/com/example/spheresweeper/logic/Campaign.kt`.
 
+## Motywy
+
+Wygląd gry zmienisz w menu, w sekcji „Ustawienia”, w części „Motyw”.
+Wybór działa od razu, a gra go zapamiętuje.
+Każdy motyw ma własne kolory kuli i ekranów, tło oraz szeryfową czcionkę.
+
+| Motyw | Charakter | Czcionka |
+|---|---|---|
+| Akwarela (domyślny) | przygaszony błękit i szary fiolet, jasne odkryte pola | Lora 600 |
+| Szałwia | szarozielona szałwia i pudrowy róż | Libre Baskerville 700 |
+| Porcelana | biel i wyblakły kobalt | EB Garamond 600 |
+| Zmierzch | ciemny: grafit, śliwka, przykurzony róż | Crimson Pro 600 |
+| Kosmos | dotychczasowy wygląd: neonowa kula na tle z gwiazdami | systemowa |
+
+Cyfry na odkrytych polach mają kontrast co najmniej 4,5:1 względem pola w motywach Akwarela, Szałwia, Porcelana i Zmierzch.
+
+### Jak dodać motyw
+
+1. Dopisz wpis `GameTheme(...)` do listy `GameThemes.all` w pliku `app/src/main/java/com/example/spheresweeper/ui/theme/GameThemes.kt`.
+   Kolejność listy to kolejność w ustawieniach, a pierwszy wpis jest motywem domyślnym.
+   Jasny motyw w pastelach zbudujesz funkcjami `pastelSphere` i `pastelUi`.
+2. Dodaj nazwę motywu (`theme_<id>`) do obu plików `strings_ui.xml`: `res/values/` i `res/values-en/`.
+3. Dodaj statyczny plik TTF czcionki do `app/src/main/res/font/` (małe litery i podkreślenia w nazwie).
+   Nie używaj czcionek zmiennych (variable), bo `minSdk` to 24.
+4. Dołącz licencję czcionki do `app/src/main/assets/licenses/`.
+
+Identyfikator `id` zapisuje się w ustawieniach. Nie zmieniaj go w istniejącym motywie.
+Nieznany identyfikator oznacza motyw domyślny.
+
+### Licencje czcionek
+
+Wszystkie dołączone czcionki są na licencji SIL Open Font License 1.1.
+Pliki TTF pochodzą z Google Fonts, a teksty licencji leżą w `app/src/main/assets/licenses/`:
+
+- Lora — The Lora Project Authors, `lora_ofl.txt`,
+- Libre Baskerville — The Libre Baskerville Project Authors, `libre_baskerville_ofl.txt`,
+- EB Garamond — The EB Garamond Project Authors, `eb_garamond_ofl.txt`,
+- Crimson Pro — The Crimson Pro Project Authors, `crimson_pro_ofl.txt`.
+
 ## Wersje narzędzi
 
 | Narzędzie | Wersja |
@@ -255,4 +294,6 @@ Typowe błędy:
 - `app/src/main/java/com/example/spheresweeper/logic/` — geometria sfery i zasady gry, czysty Kotlin bez zależności od Androida.
 - `app/src/test/java/com/example/spheresweeper/logic/` — testy jednostkowe JUnit 4.
 - `app/src/main/java/com/example/spheresweeper/ui/` — ekrany Compose, rysowanie kuli i obsługa gestów.
+- `app/src/main/java/com/example/spheresweeper/ui/theme/` — motywy: model, rejestr i motyw Compose.
+- `app/src/main/res/font/` i `app/src/main/assets/licenses/` — czcionki motywów i ich licencje.
 - `.github/workflows/build.yml` — CI: testy, APK debug i wydania z tagów.
