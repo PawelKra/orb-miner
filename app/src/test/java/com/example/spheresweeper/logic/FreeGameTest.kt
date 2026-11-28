@@ -171,6 +171,51 @@ class FreeGameTest {
         assertEquals(2 * FreeGame.ATTEMPTS, calls)
     }
 
+    /** [real] with a layout of the same sphere whose ocean covers 30 to 35 percent of the cells. */
+    private fun tooMuchOcean(real: PreparedFreeGame, g: SphereGeometry): PreparedFreeGame {
+        val size = real.spec.size
+        val layout = BoardLayout.generate(
+            g, 0, size.wallMinLength, size.wallMaxLength, 0, Random(real.spec.seed),
+            islandCount = 1, oceanShare = 0.30..0.35,
+        )
+        val cells = layout.scopes.size
+        assertTrue("the stand-in has too much ocean", cells - layout.presentCount > FreeGame.maxOceanCells(cells))
+        return PreparedFreeGame(real.spec, layout, real.start, real.mines, real.board)
+    }
+
+    @Test
+    fun drawRetriesWhenTheOceanIsAboveTheFreeShare() {
+        val size = BoardSize.TINY
+        val tried = ArrayList<FreeGameSpec>()
+        val oceanAttempts = 2
+        val drawn = FreeGame.draw(geometry(size), size, walls = true, seeds = Random(9)) { spec, g ->
+            tried.add(spec)
+            val real = FreeGame.build(spec, g)
+            if (tried.size <= oceanAttempts) tooMuchOcean(real, g) else real
+        }
+        assertEquals("boards with too much ocean are retried", oceanAttempts + 1, tried.size)
+        assertEquals(tried.last(), drawn.spec)
+        val cells = drawn.layout.scopes.size
+        assertTrue(cells - drawn.layout.presentCount <= FreeGame.maxOceanCells(cells))
+        assertSameGame("after too much ocean", drawn, FreeGame.build(drawn.spec, geometry(size)))
+    }
+
+    @Test
+    fun drawFailsWhenEveryLayoutHasTooMuchOcean() {
+        val size = BoardSize.TINY
+        var calls = 0
+        try {
+            FreeGame.draw(geometry(size), size, walls = true, seeds = Random(4)) { spec, g ->
+                calls++
+                tooMuchOcean(FreeGame.build(spec, g), g)
+            }
+            throw AssertionError("draw did not fail")
+        } catch (e: IllegalStateException) {
+            assertTrue(e.message ?: "", e.message?.contains("ocean") == true)
+        }
+        assertEquals(2 * FreeGame.ATTEMPTS, calls)
+    }
+
     @Test
     fun drawnGamesAreInPlay() {
         for (size in listOf(BoardSize.TINY, BoardSize.SMALL)) {
@@ -178,6 +223,66 @@ class FreeGameTest {
                 for (seed in 0L until 40L) {
                     val drawn = FreeGame.draw(geometry(size), size, walls, Random(seed))
                     assertEquals("$size walls=$walls seed=$seed", GameStatus.PLAYING, drawn.board.status)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun freeGamesKeepTheOceanWithinTheFreeShare() {
+        for (size in BoardSize.values()) {
+            if (size.islands == 0) continue
+            for (walls in listOf(true, false)) {
+                for (seed in 0L until 10L) {
+                    val label = "$size walls=$walls seed=$seed"
+                    val drawn = FreeGame.draw(geometry(size), size, walls, Random(seed))
+                    val cells = drawn.layout.scopes.size
+                    val share = (cells - drawn.layout.presentCount).toDouble() / cells
+                    assertEquals("$label islands", size.islands, drawn.layout.islandCount)
+                    assertTrue("$label ocean share $share", share in BoardSize.OCEAN_SHARE)
+                }
+            }
+        }
+    }
+
+    /**
+     * The largest spheres draw games in play that [FreeGame.build] makes the documented way (layout with
+     * [BoardSize.OCEAN_SHARE], then [NoGuessGenerator.generate] on the same [StableRandom]) and that the
+     * solver finishes without guessing.
+     */
+    @Test
+    fun theLargestSizesDrawSolvableGames() {
+        for (size in listOf(BoardSize.MEGA, BoardSize.GARGANTUAN)) {
+            val geometry = geometry(size)
+            for (walls in listOf(true, false)) {
+                for (seed in 0L until 5L) {
+                    val label = "$size walls=$walls seed=$seed"
+                    val drawn = FreeGame.draw(geometry, size, walls, Random(seed))
+                    val spec = drawn.spec
+                    assertEquals("$label status", GameStatus.PLAYING, drawn.board.status)
+
+                    val random = StableRandom(spec.seed)
+                    val layout = BoardLayout.generate(
+                        geometry, if (walls) size.walls else 0, size.wallMinLength, size.wallMaxLength, size.farCells,
+                        random, size.lineCells, size.islands, size.portals, spec.rooms, BoardSize.OCEAN_SHARE,
+                    )
+                    val mines = size.minesFor(layout)
+                    val generated = NoGuessGenerator.generate(
+                        layout, mines, random, size.locks, forbidEmptyLines = spec.rooms == 0,
+                    )
+                    assertEquals("$label present", layout.presentMask().toList(), drawn.layout.presentMask().toList())
+                    assertArrayEquals("$label mines", generated.mines, drawn.mines)
+                    assertEquals("$label start", generated.start, drawn.start)
+                    assertEquals("$label mine count", mines, drawn.board.mineCount)
+                    assertEquals("$label far cells", size.farCells, layout.farCount)
+                    assertTrue("$label locks", drawn.board.lockCount <= size.locks)
+
+                    val mineMask = BooleanArray(layout.scopes.size)
+                    for (cell in generated.mines) mineMask[cell] = true
+                    val solver = LogicSolver(layout.scopes, layout.presentMask())
+                    solver.load(mineMask, generated.lockThresholds, generated.lockRegions)
+                    solver.reveal(generated.start)
+                    assertTrue("$label solvable without guessing", solver.run())
                 }
             }
         }

@@ -70,6 +70,7 @@ import com.example.spheresweeper.logic.BoardSize
 import com.example.spheresweeper.logic.Campaign
 import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.MatchEngine
+import com.example.spheresweeper.logic.MatchMode
 import com.example.spheresweeper.logic.SphereGeometry
 import com.example.spheresweeper.math.Quaternion
 import com.example.spheresweeper.ui.theme.GameTheme
@@ -248,8 +249,9 @@ private fun ColumnScope.BoardList(vm: GameViewModel) {
 }
 
 /**
- * Territory match for two players on one phone: a card with the rules in short, the board size and
- * the moves per turn as two radio groups, and a button that starts the match. The choices live in the
+ * Matches for two players on one phone: a card with the mode (territory or five-move war), the rules
+ * of that mode in short, the board size and, for a territory match, the moves per turn as radio groups,
+ * and a button that starts the match. A war always has its fixed five moves. The choices live in the
  * view model; the walls follow the free-play switch above.
  */
 @Composable
@@ -260,6 +262,8 @@ private fun ColumnScope.MatchSection(vm: GameViewModel) {
     val first = colors.players[0]
     val second = colors.players[1]
     val resources = LocalContext.current.resources
+    val mode = vm.matchMode
+    val war = mode == MatchMode.WAR
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -278,20 +282,42 @@ private fun ColumnScope.MatchSection(vm: GameViewModel) {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.match_title),
+                    text = stringResource(if (war) R.string.war_title else R.string.match_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
                 )
                 Text(
-                    text = stringResource(R.string.match_card_subtitle),
+                    text = stringResource(if (war) R.string.war_card_subtitle else R.string.match_card_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
             }
         }
+        Spacer(Modifier.height(12.dp))
+        ChoiceLabel(stringResource(R.string.match_mode))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (option in MatchMode.values()) {
+                ChoiceChip(
+                    text = stringResource(
+                        when (option) {
+                            MatchMode.TERRITORY -> R.string.match_mode_territory
+                            MatchMode.WAR -> R.string.match_mode_war
+                        },
+                    ),
+                    selected = option == mode,
+                    onClick = { vm.updateMatchMode(option) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.match_rules),
+            text = stringResource(if (war) R.string.war_rules else R.string.match_rules),
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
@@ -318,22 +344,25 @@ private fun ColumnScope.MatchSection(vm: GameViewModel) {
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        ChoiceLabel(stringResource(R.string.match_moves_per_turn))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            for (moves in MatchEngine.MIN_MOVES_PER_TURN..MatchEngine.MAX_MOVES_PER_TURN) {
-                ChoiceChip(
-                    text = moves.toString(),
-                    selected = moves == vm.matchMovesPerTurn,
-                    onClick = { vm.updateMatchMovesPerTurn(moves) },
-                    modifier = Modifier.weight(1f),
-                    description = resources.getQuantityString(R.plurals.match_moves_desc, moves, moves),
-                )
+        // A war has a fixed number of moves, so only a territory match offers the choice.
+        if (!war) {
+            Spacer(Modifier.height(12.dp))
+            ChoiceLabel(stringResource(R.string.match_moves_per_turn))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (moves in MatchEngine.MIN_MOVES_PER_TURN..MatchEngine.MAX_MOVES_PER_TURN) {
+                    ChoiceChip(
+                        text = moves.toString(),
+                        selected = moves == vm.matchMovesPerTurn,
+                        onClick = { vm.updateMatchMovesPerTurn(moves) },
+                        modifier = Modifier.weight(1f),
+                        description = resources.getQuantityString(R.plurals.match_moves_desc, moves, moves),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -426,6 +455,8 @@ internal fun boardNameRes(size: BoardSize): Int = when (size) {
     BoardSize.LARGE -> R.string.board_large
     BoardSize.HUGE -> R.string.board_huge
     BoardSize.GIANT -> R.string.board_giant
+    BoardSize.MEGA -> R.string.board_mega
+    BoardSize.GARGANTUAN -> R.string.board_gargantuan
 }
 
 @Composable

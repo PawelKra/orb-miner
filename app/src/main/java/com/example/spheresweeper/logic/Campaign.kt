@@ -229,10 +229,12 @@ object Campaign {
 
     /**
      * Expected land on a board of [cellCount] cells with islands: the ocean takes on average the middle
-     * of [BoardLayout.MIN_OCEAN_SHARE]..[BoardLayout.MAX_OCEAN_SHARE], rounded to whole cells.
+     * of [oceanShare] ([BoardLayout.CAMPAIGN_OCEAN_SHARE] unless given), rounded to whole cells.
      */
-    fun expectedLand(cellCount: Int): Int =
-        cellCount - (cellCount * (BoardLayout.MIN_OCEAN_SHARE + BoardLayout.MAX_OCEAN_SHARE) / 2).roundToInt()
+    fun expectedLand(
+        cellCount: Int,
+        oceanShare: ClosedFloatingPointRange<Double> = BoardLayout.CAMPAIGN_OCEAN_SHARE,
+    ): Int = cellCount - (cellCount * (oceanShare.start + oceanShare.endInclusive) / 2).roundToInt()
 
     /**
      * Mine density [TUNING] sets for [spec]: its branch's density ramp at the level's position. Levels

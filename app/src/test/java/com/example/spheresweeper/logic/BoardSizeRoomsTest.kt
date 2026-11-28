@@ -7,7 +7,8 @@ import kotlin.random.Random
 
 /**
  * Free games with rooms: every [BoardSize] is built the way the game builds it ([BoardLayout.generate]
- * with all counts of the size, mines from [BoardSize.minesFor], then [NoGuessGenerator.generate]).
+ * with all counts of the size and [BoardSize.OCEAN_SHARE], mines from [BoardSize.minesFor], then
+ * [NoGuessGenerator.generate]).
  */
 class BoardSizeRoomsTest {
 
@@ -19,11 +20,39 @@ class BoardSizeRoomsTest {
         val expected = mapOf(
             BoardSize.TINY to 0, BoardSize.SMALL to 3, BoardSize.MEDIUM to 4,
             BoardSize.LARGE to 6, BoardSize.HUGE to 8, BoardSize.GIANT to 11,
+            BoardSize.MEGA to 14, BoardSize.GARGANTUAN to 17,
         )
         for (size in BoardSize.values()) {
             assertEquals("$size rooms", expected.getValue(size), size.rooms)
-            val max = BoardLayout.maxRoomCount(geometries.getValue(size), size.islands)
+            val geometry = geometries.getValue(size)
+            val max = BoardLayout.maxRoomCount(geometry, size.islands, BoardSize.OCEAN_SHARE)
             assertTrue("$size ${size.rooms} rooms, at most $max", size.rooms <= max)
+            val maxIslands = BoardLayout.maxIslandCount(geometry, BoardSize.OCEAN_SHARE)
+            assertTrue("$size ${size.islands} islands, at most $maxIslands", size.islands <= maxIslands)
+        }
+    }
+
+    /** Each size is a bigger sphere than the one before it and never easier on any count. */
+    @Test
+    fun sizesGrowInOrder() {
+        val sizes = BoardSize.values()
+        for (k in 1 until sizes.size) {
+            val small = sizes[k - 1]
+            val big = sizes[k]
+            val label = "$small -> $big"
+            assertTrue("$label frequency", big.frequency > small.frequency)
+            assertTrue(
+                "$label density ${small.mineDensity} -> ${big.mineDensity}", big.mineDensity >= small.mineDensity,
+            )
+            val counts = listOf<Pair<String, (BoardSize) -> Int>>(
+                "lives" to { it.lives }, "hints" to { it.hints }, "walls" to { it.walls },
+                "wall length" to { it.wallMaxLength }, "far cells" to { it.farCells },
+                "line cells" to { it.lineCells }, "islands" to { it.islands }, "portals" to { it.portals },
+                "locks" to { it.locks }, "rooms" to { it.rooms },
+            )
+            for ((name, count) in counts) {
+                assertTrue("$label $name ${count(small)} -> ${count(big)}", count(big) >= count(small))
+            }
         }
     }
 
@@ -43,7 +72,7 @@ class BoardSizeRoomsTest {
                 val random = Random(seed)
                 val layout = BoardLayout.generate(
                     geometry, size.walls, size.wallMinLength, size.wallMaxLength, size.farCells, random,
-                    size.lineCells, size.islands, size.portals, size.rooms,
+                    size.lineCells, size.islands, size.portals, size.rooms, BoardSize.OCEAN_SHARE,
                 )
                 val mines = size.minesFor(layout)
                 val generated = NoGuessGenerator.generate(layout, mines, random, size.locks)

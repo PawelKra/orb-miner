@@ -76,6 +76,7 @@ import com.example.spheresweeper.logic.CampaignProgress
 import com.example.spheresweeper.logic.GameStatus
 import com.example.spheresweeper.logic.LevelSpec
 import com.example.spheresweeper.logic.MatchEngine
+import com.example.spheresweeper.logic.MatchMode
 import com.example.spheresweeper.logic.MinesweeperBoard
 import com.example.spheresweeper.logic.RecordResult
 import com.example.spheresweeper.logic.SphereGeometry
@@ -117,7 +118,7 @@ fun GameScreen(vm: GameViewModel) {
     val status = vm.status
     val config = vm.config
     val match = config as? GameConfig.Match
-    // A match ends with its last safe cell, when its board is solved.
+    // A match ends by its own rules, which need not leave the board solved.
     val finished = if (match != null) vm.matchOver else status == GameStatus.WON || status == GameStatus.LOST
     val level = (config as? GameConfig.Level)?.spec
     val colors = themeColors
@@ -198,11 +199,23 @@ fun GameScreen(vm: GameViewModel) {
         if (match != null && board != null && playerMoved && !finished) {
             MatchTurnLine(
                 vm = vm,
-                movesPerTurn = match.movesPerTurn,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(horizontal = HINT_HORIZONTAL_PADDING, vertical = HINT_VERTICAL_PADDING),
+            )
+        }
+
+        // In a war the points of each move show for a moment below the HUD.
+        if (match?.mode == MatchMode.WAR && board != null) {
+            MatchPointsPop(
+                points = vm.matchPoints,
+                shownId = vm.matchPointsShownId,
+                onShown = vm::markMatchPointsShown,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(top = POINTS_POP_TOP),
             )
         }
 
@@ -249,6 +262,7 @@ fun GameScreen(vm: GameViewModel) {
                     onMap = { vm.exitGame() },
                 )
                 is GameConfig.Match -> MatchResultCard(
+                    mode = config.mode,
                     leader = vm.matchLeader,
                     firstScore = vm.matchScore(0),
                     secondScore = vm.matchScore(1),
@@ -282,7 +296,9 @@ fun GameScreen(vm: GameViewModel) {
             )
             MatchExit.RESTART -> ConfirmOverlay(
                 title = stringResource(R.string.match_restart_title),
-                text = stringResource(R.string.match_restart_text),
+                text = stringResource(
+                    if (match?.mode == MatchMode.WAR) R.string.war_restart_text else R.string.match_restart_text,
+                ),
                 confirm = stringResource(R.string.match_restart_confirm),
                 onConfirm = {
                     pendingExit = null
@@ -371,14 +387,18 @@ private fun ConfirmOverlay(
     }
 }
 
-/** Whose turn it is, in the player's colour, and with several moves per turn the moves left. */
+/**
+ * Whose turn it is, in the player's colour: with several moves in the turn the moves left, and in a
+ * tie-break turn of a war a line that names it.
+ */
 @Composable
-private fun MatchTurnLine(vm: GameViewModel, movesPerTurn: Int, modifier: Modifier = Modifier) {
+private fun MatchTurnLine(vm: GameViewModel, modifier: Modifier = Modifier) {
     val player = vm.matchPlayer
-    val text = if (movesPerTurn > 1) {
-        stringResource(R.string.match_turn_moves, player + 1, vm.matchMovesLeft, movesPerTurn)
-    } else {
-        stringResource(R.string.match_turn, player + 1)
+    val turnMoves = vm.matchTurnMoves
+    val text = when {
+        vm.matchTieBreak -> stringResource(R.string.war_turn_tie_break, player + 1)
+        turnMoves > 1 -> stringResource(R.string.match_turn_moves, player + 1, vm.matchMovesLeft, turnMoves)
+        else -> stringResource(R.string.match_turn, player + 1)
     }
     Text(
         text = text,
@@ -470,6 +490,56 @@ private fun HandoffOverlay(player: Int, onContinue: () -> Unit) {
     }
 }
 
+/**
+ * Score change of the last move of a war, "+2", "−3" or "±0", in the mover's colour. Each new move
+ * shows it again; it fades out after [POINTS_POP_MILLIS]. Points whose id is [shownId] were shown
+ * already and stay hidden; [onShown] gets the id of points as they appear.
+ */
+@Composable
+private fun MatchPointsPop(
+    points: MatchPoints?,
+    shownId: Int,
+    onShown: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(points?.id) {
+        visible = points != null && points.id != shownId
+        if (!visible || points == null) return@LaunchedEffect
+        onShown(points.id)
+        delay(POINTS_POP_MILLIS)
+        visible = false
+    }
+    // The points stay set after the delay, so the text keeps its value while it fades out.
+    val last = points ?: return
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+        exit = fadeOut(),
+    ) {
+        Text(
+            text = formatPoints(last.points),
+            style = MaterialTheme.typography.headlineMedium,
+            color = themeColors.players[last.player],
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** [points] with its sign: "+2", "−3" (with a minus sign) or "±0". */
+private fun formatPoints(points: Int): String = when {
+    points > 0 -> "+$points"
+    points < 0 -> "\u2212${-points}"
+    else -> "\u00B10"
+}
+
+/** How long the points of a war move stay on screen. */
+private const val POINTS_POP_MILLIS = 1100L
+
+/** Distance of the points of a war move from the top of the safe area, below the HUD row. */
+private val POINTS_POP_TOP = 76.dp
+
 /** Taps on the handoff panel are ignored this long after it appears. */
 private const val HANDOFF_ARM_MILLIS = 500L
 
@@ -505,19 +575,25 @@ internal fun DrawScope.drawPlayerHex(
 }
 
 /**
- * Cells of [player] in a match: the player's hexagon and the count. The player on the move gets a
- * filled hexagon and a full-strength ring in their colour; the other one an outlined hexagon.
+ * Score of [player] in a match, cells or war points: the player's hexagon and the number. The player on
+ * the move gets a filled hexagon and a full-strength ring in their colour; the other one an outlined
+ * hexagon.
  */
 @Composable
 private fun PlayerPill(vm: GameViewModel, player: Int) {
     val accent = themeColors.players[player]
     val score = vm.matchScore(player)
     val active = !vm.matchOver && vm.matchPlayer == player
+    val war = (vm.config as? GameConfig.Match)?.mode == MatchMode.WAR
+    val description = when {
+        war && active -> R.string.war_score_turn_desc
+        war -> R.string.war_score_desc
+        active -> R.string.match_score_turn_desc
+        else -> R.string.match_score_desc
+    }
     StatPill(
         value = score.toString(),
-        contentDescription = stringResource(
-            if (active) R.string.match_score_turn_desc else R.string.match_score_desc, player + 1, score,
-        ),
+        contentDescription = stringResource(description, player + 1, score),
         accent = accent,
         modifier = if (active) Modifier.border(2.dp, accent, RoundedCornerShape(50)) else Modifier,
         icon = { drawPlayerHex(it, filled = active) },
@@ -525,12 +601,14 @@ private fun PlayerPill(vm: GameViewModel, player: Int) {
 }
 
 /**
- * End of a match: the winner in their colour, or a draw, and the cells of both players, with a new
- * match on the same settings and the way back to the menu. [unownedMines] mines nobody found count for
- * nobody; the card names their number when there are any.
+ * End of a match: the winner in their colour, or a draw, and the scores of both players (cells in a
+ * territory match, points in a war; see [mode]), with a new match on the same settings and the way back
+ * to the menu. [unownedMines] mines nobody found count for nobody; the card names their number when
+ * there are any.
  */
 @Composable
 private fun MatchResultCard(
+    mode: MatchMode,
     leader: Int,
     firstScore: Int,
     secondScore: Int,
@@ -564,7 +642,12 @@ private fun MatchResultCard(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.match_result_subtitle),
+            text = stringResource(
+                when (mode) {
+                    MatchMode.TERRITORY -> R.string.match_result_subtitle
+                    MatchMode.WAR -> R.string.war_result_subtitle
+                },
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -573,7 +656,14 @@ private fun MatchResultCard(
         Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
             for (player in 0 until MatchEngine.PLAYERS) {
                 val score = if (player == 0) firstScore else secondScore
-                val description = stringResource(R.string.match_score_desc, player + 1, score)
+                val description = stringResource(
+                    when (mode) {
+                        MatchMode.TERRITORY -> R.string.match_score_desc
+                        MatchMode.WAR -> R.string.war_score_desc
+                    },
+                    player + 1,
+                    score,
+                )
                 Column(
                     modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = description },
                     horizontalAlignment = Alignment.CenterHorizontally,

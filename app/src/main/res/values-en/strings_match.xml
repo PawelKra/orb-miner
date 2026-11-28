@@ -38,4 +38,20 @@
 
     <string name="how_to_match_title">Two players</string>
     <string name="how_to_match">In a territory match two players take turns on one phone. Cells you reveal and mines you mark correctly are yours. A safe cell marked as a mine and a mine that goes off go to your opponent. The match ends with the last safe cell, and mines nobody found belong to nobody. Whoever owns more cells wins.</string>
+
+    <string name="match_mode">Mode</string>
+    <string name="match_mode_territory">Territory</string>
+    <string name="match_mode_war">War</string>
+
+    <string name="war_title">Five-move war</string>
+    <string name="war_card_subtitle">Each player has 5 moves. More points wins.</string>
+    <string name="war_rules">Player 1 makes all 5 moves first, then player 2. A revealed cell scores its number, plus 1 for each cell revealed with it. A mine marked correctly +3, a wrong mark −3, a mine that goes off −5. On a tie each player makes one more move until someone leads. Walls as in free play.</string>
+    <string name="war_score_desc">Player %1$d, points: %2$d</string>
+    <string name="war_score_turn_desc">Player %1$d, points: %2$d, their turn now</string>
+    <string name="war_turn_tie_break">Tie-break: player %1$d moves</string>
+    <string name="war_result_subtitle">Points each player scored</string>
+    <string name="war_restart_text">This war will be lost, and the players will start on a new board.</string>
+
+    <string name="how_to_war_title">Five-move war</string>
+    <string name="how_to_war">Player 1 makes all 5 moves first, then player 2 makes theirs. A revealed cell scores its number, plus 1 point for each cell revealed with it. A mine marked correctly gives 3 points, a wrong mark takes 3, and a mine that goes off takes 5. Whoever has more points wins. On a tie each player makes one more move until someone takes the lead. The war ends at once with the last safe cell, and mines nobody found score for nobody.</string>
 </resources>
